@@ -1,0 +1,869 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis, pg_trgm, unaccent]
+}
+
+// ─────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────
+
+enum UserRole {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum OtpType {
+  EMAIL_VERIFICATION
+  PHONE_VERIFICATION
+  PASSWORD_RESET
+  PHONE_AUTH
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DocumentType {
+  GOVERNMENT_ID
+  SELFIE
+  PROOF_OF_ADDRESS
+}
+
+enum ServiceStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum QuotationStatus {
+  DRAFT
+  PENDING
+  NEGOTIATING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum BookingStatus {
+  PENDING
+  ACCEPTED
+  SCHEDULED
+  IN_PROGRESS
+  PARTIALLY_COMPLETED
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  DOCUMENT
+  AUDIO
+  SYSTEM
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+}
+
+enum NotificationType {
+  NEW_MESSAGE
+  NEW_QUOTE
+  QUOTE_ACCEPTED
+  QUOTE_REJECTED
+  BOOKING_CREATED
+  BOOKING_ACCEPTED
+  BOOKING_SCHEDULED
+  BOOKING_IN_PROGRESS
+  BOOKING_COMPLETED
+  BOOKING_CANCELLED
+  BOOKING_DISPUTED
+  VERIFICATION_SUBMITTED
+  VERIFICATION_APPROVED
+  VERIFICATION_REJECTED
+  NEW_FOLLOWER
+  SERVICE_APPROVED
+  SERVICE_REJECTED
+  SERVICE_SUSPENDED
+  REVIEW_RECEIVED
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  REJECTED
+}
+
+enum UploadPurpose {
+  PROFILE_IMAGE
+  SERVICE_IMAGE
+  PORTFOLIO_MEDIA
+  VERIFICATION_DOCUMENT
+  CHAT_ATTACHMENT
+  DISPUTE_EVIDENCE
+  REVIEW_IMAGE
+  CATEGORY_ICON
+}
+
+// ─────────────────────────────────────────
+// USER & AUTH
+// ─────────────────────────────────────────
+
+model User {
+  id                  String    @id @default(uuid())
+  phone               String    @unique
+  email               String?   @unique
+  passwordHash        String?
+  role                UserRole  @default(USER)
+  isPhoneVerified     Boolean   @default(true)
+  isEmailVerified     Boolean   @default(false)
+  isActive            Boolean   @default(true)
+  isSuspended         Boolean   @default(false)
+  suspendedReason     String?
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  deletedAt           DateTime?
+
+  profile               UserProfile?
+  devices               UserDevice[]
+  refreshTokens         RefreshToken[]
+  otpCodes              OtpCode[]
+  verification          Verification?
+  services              ServiceListing[]
+  portfolio             Portfolio?
+  sentMessages          Message[]                @relation("SentMessages")
+  conversations         ConversationParticipant[]
+  quotationsAsProvider  Quotation[]              @relation("ProviderQuotations")
+  quotationsAsCustomer  Quotation[]              @relation("CustomerQuotations")
+  bookingsAsCustomer    Booking[]                @relation("CustomerBookings")
+  bookingsAsProvider    Booking[]                @relation("ProviderBookings")
+  reviewsGiven          Review[]                 @relation("ReviewsGiven")
+  reviewsReceived       Review[]                 @relation("ReviewsReceived")
+  followers             Follow[]                 @relation("UserFollowers")
+  following             Follow[]                 @relation("UserFollowing")
+  savedServices         SavedService[]
+  serviceLikes          ServiceLike[]
+  notifications         Notification[]
+  notificationPrefs     NotificationPreference?
+  disputesRaised        Dispute[]                @relation("DisputeRaisedBy")
+  disputesAsProvider    Dispute[]                @relation("DisputeProvider")
+  uploads               Upload[]
+  auditLogs             AuditLog[]
+
+  @@index([phone])
+  @@index([email])
+  @@index([role])
+  @@index([isActive, isSuspended])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model UserProfile {
+  id              String    @id @default(uuid())
+  userId          String    @unique
+  firstName       String?
+  lastName        String?
+  displayName     String?
+  bio             String?
+  avatarUrl       String?
+  city            String?
+  state           String?
+  country         String    @default("NG")
+  latitude        Float?
+  longitude       Float?
+  location        Unsupported("geography(Point, 4326)")?
+  isProvider      Boolean   @default(false)
+  avgRating       Float     @default(0)
+  totalReviews    Int       @default(0)
+  completedJobs   Int       @default(0)
+  completionRate  Float     @default(0)
+  responseRate    Float     @default(0)
+  avgResponseTime Int       @default(0)   // seconds
+  travelRadius    Int       @default(10)  // km
+  followersCount  Int       @default(0)
+  followingCount  Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([city, state])
+  @@map("user_profiles")
+}
+
+model UserDevice {
+  id          String   @id @default(uuid())
+  userId      String
+  deviceId    String
+  deviceType  String   // ios | android | web
+  deviceName  String?
+  fcmToken    String?
+  ipAddress   String?
+  userAgent   String?
+  isActive    Boolean  @default(true)
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@index([userId])
+  @@map("user_devices")
+}
+
+model RefreshToken {
+  id         String   @id @default(uuid())
+  userId     String
+  tokenHash  String   @unique
+  deviceId   String?
+  ipAddress  String?
+  expiresAt  DateTime
+  isRevoked  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model OtpCode {
+  id        String   @id @default(uuid())
+  userId    String
+  code      String
+  type      OtpType
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@map("otp_codes")
+}
+
+// ─────────────────────────────────────────
+// VERIFICATION
+// ─────────────────────────────────────────
+
+model Verification {
+  id              String             @id @default(uuid())
+  userId          String             @unique
+  status          VerificationStatus @default(PENDING)
+  submittedAt     DateTime           @default(now())
+  reviewedAt      DateTime?
+  reviewedBy      String?
+  reviewNotes     String?
+  rejectionReason String?
+  updatedAt       DateTime           @updatedAt
+
+  user      User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents VerificationDocument[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("verifications")
+}
+
+model VerificationDocument {
+  id             String       @id @default(uuid())
+  verificationId String
+  documentType   DocumentType
+  fileUrl        String
+  fileName       String
+  fileSize       Int
+  mimeType       String
+  createdAt      DateTime     @default(now())
+
+  verification Verification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+
+  @@index([verificationId])
+  @@map("verification_documents")
+}
+
+// ─────────────────────────────────────────
+// CATEGORIES
+// ─────────────────────────────────────────
+
+model Category {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  iconUrl     String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  parentId    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  parent   Category?        @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[]       @relation("CategoryHierarchy")
+  services ServiceListing[]
+
+  @@index([slug])
+  @@index([parentId])
+  @@index([isActive])
+  @@map("categories")
+}
+
+// ─────────────────────────────────────────
+// SERVICES
+// ─────────────────────────────────────────
+
+model ServiceListing {
+  id              String        @id @default(uuid())
+  providerId      String
+  categoryId      String
+  subcategoryId   String?
+  title           String
+  slug            String        @unique
+  description     String
+  startingPrice   Float
+  minPrice        Float?
+  maxPrice        Float?
+  serviceRadius   Int           @default(10)
+  status          ServiceStatus @default(DRAFT)
+  isPublished     Boolean       @default(false)
+  reviewNotes     String?
+  rejectionReason String?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  trendingScore   Float         @default(0)
+  engagementScore Float         @default(0)
+  likesCount      Int           @default(0)
+  savesCount      Int           @default(0)
+  sharesCount     Int           @default(0)
+  viewsCount      Int           @default(0)
+  searchVector    Unsupported("tsvector")?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+
+  provider      User            @relation(fields: [providerId], references: [id])
+  category      Category        @relation(fields: [categoryId], references: [id])
+  images        ServiceImage[]
+  portfolioItems PortfolioItem[]
+  availability  Availability?
+  bookings      Booking[]
+  reviews       Review[]
+  savedBy       SavedService[]
+  likes         ServiceLike[]
+  quotations    Quotation[]
+
+  @@index([providerId])
+  @@index([categoryId])
+  @@index([status, isPublished])
+  @@index([slug])
+  @@index([startingPrice])
+  @@index([trendingScore])
+  @@index([createdAt])
+  @@index([deletedAt])
+  @@map("service_listings")
+}
+
+model ServiceImage {
+  id           String   @id @default(uuid())
+  serviceId    String
+  url          String
+  thumbnailUrl String?
+  caption      String?
+  sortOrder    Int      @default(0)
+  isPrimary    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  service ServiceListing @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+  @@map("service_images")
+}
+
+// ─────────────────────────────────────────
+// PORTFOLIO
+// ─────────────────────────────────────────
+
+model Portfolio {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items PortfolioItem[]
+
+  @@map("portfolios")
+}
+
+model PortfolioItem {
+  id           String    @id @default(uuid())
+  portfolioId  String?
+  serviceId    String?
+  title        String?
+  description  String?
+  mediaUrl     String
+  thumbnailUrl String?
+  mediaType    MediaType
+  isBefore     Boolean   @default(false)
+  isAfter      Boolean   @default(false)
+  sortOrder    Int       @default(0)
+  createdAt    DateTime  @default(now())
+
+  portfolio Portfolio?      @relation(fields: [portfolioId], references: [id])
+  service   ServiceListing? @relation(fields: [serviceId], references: [id])
+
+  @@index([portfolioId])
+  @@index([serviceId])
+  @@map("portfolio_items")
+}
+
+// ─────────────────────────────────────────
+// AVAILABILITY
+// ─────────────────────────────────────────
+
+model Availability {
+  id             String    @id @default(uuid())
+  serviceId      String    @unique
+  isVacationMode Boolean   @default(false)
+  vacationStart  DateTime?
+  vacationEnd    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  service  ServiceListing    @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  slots    AvailabilitySlot[]
+  holidays ProviderHoliday[]
+
+  @@map("availability")
+}
+
+model AvailabilitySlot {
+  id             String   @id @default(uuid())
+  availabilityId String
+  dayOfWeek      Int      // 0=Sun … 6=Sat
+  startTime      String   // HH:MM
+  endTime        String   // HH:MM
+  isAvailable    Boolean  @default(true)
+
+  availability Availability @relation(fields: [availabilityId], references: [id], onDelete: Cascade)
+
+  @@unique([availabilityId, dayOfWeek])
+  @@index([availabilityId])
+  @@map("availability_slots")
+}
+
+model ProviderHoliday {
+  id             String   @id @default(uuid())
+  availabilityId String
+  date           DateTime
+  reason         String?
+  createdAt      DateTime @default(now())
+
+  availability Availability @relation(fields: [availabilityId], references: [id], onDelete: Cascade)
+
+  @@index([availabilityId])
+  @@map("provider_holidays")
+}
+
+// ─────────────────────────────────────────
+// CHAT
+// ─────────────────────────────────────────
+
+model Conversation {
+  id            String    @id @default(uuid())
+  title         String?
+  serviceId     String?
+  lastMessageAt DateTime?
+  lastMessage   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  participants ConversationParticipant[]
+  messages     Message[]
+  quotations   Quotation[]
+
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String    @id @default(uuid())
+  conversationId String
+  userId         String
+  isRead         Boolean   @default(false)
+  lastReadAt     DateTime?
+  joinedAt       DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@unique([conversationId, userId])
+  @@index([conversationId])
+  @@index([userId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id             String      @id @default(uuid())
+  conversationId String
+  senderId       String
+  content        String?
+  type           MessageType @default(TEXT)
+  isDelivered    Boolean     @default(false)
+  isRead         Boolean     @default(false)
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  createdAt      DateTime    @default(now())
+
+  conversation Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User          @relation("SentMessages", fields: [senderId], references: [id])
+  media        MessageMedia[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+  @@map("messages")
+}
+
+model MessageMedia {
+  id           String    @id @default(uuid())
+  messageId    String
+  url          String
+  thumbnailUrl String?
+  mediaType    MediaType
+  fileName     String?
+  fileSize     Int?
+  mimeType     String?
+  createdAt    DateTime  @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@map("message_media")
+}
+
+// ─────────────────────────────────────────
+// QUOTATIONS
+// ─────────────────────────────────────────
+
+model Quotation {
+  id                 String          @id @default(uuid())
+  conversationId     String
+  serviceId          String?
+  providerId         String
+  customerId         String
+  revisionNumber     Int             @default(1)
+  parentId           String?
+  status             QuotationStatus @default(DRAFT)
+  description        String
+  labourCost         Float           @default(0)
+  materialCost       Float           @default(0)
+  transportationCost Float           @default(0)
+  additionalCharges  Float           @default(0)
+  taxRate            Float           @default(0)
+  totalAmount        Float
+  notes              String?
+  validUntil         DateTime?
+  acceptedAt         DateTime?
+  rejectedAt         DateTime?
+  rejectionReason    String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  conversation Conversation    @relation(fields: [conversationId], references: [id])
+  service      ServiceListing? @relation(fields: [serviceId], references: [id])
+  provider     User            @relation("ProviderQuotations", fields: [providerId], references: [id])
+  customer     User            @relation("CustomerQuotations", fields: [customerId], references: [id])
+  parent       Quotation?      @relation("QuotationRevisions", fields: [parentId], references: [id])
+  revisions    Quotation[]     @relation("QuotationRevisions")
+  booking      Booking?
+
+  @@index([conversationId])
+  @@index([providerId])
+  @@index([customerId])
+  @@index([status])
+  @@map("quotations")
+}
+
+// ─────────────────────────────────────────
+// BOOKINGS
+// ─────────────────────────────────────────
+
+model Booking {
+  id              String        @id @default(uuid())
+  customerId      String
+  providerId      String
+  serviceId       String
+  quotationId     String        @unique
+  status          BookingStatus @default(PENDING)
+  scheduledAt     DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  completionNotes String?
+  providerNotes   String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  customer  User           @relation("CustomerBookings", fields: [customerId], references: [id])
+  provider  User           @relation("ProviderBookings", fields: [providerId], references: [id])
+  service   ServiceListing @relation(fields: [serviceId], references: [id])
+  quotation Quotation      @relation(fields: [quotationId], references: [id])
+  review    Review?
+  dispute   Dispute?
+
+  @@index([customerId])
+  @@index([providerId])
+  @@index([serviceId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("bookings")
+}
+
+// ─────────────────────────────────────────
+// REVIEWS
+// ─────────────────────────────────────────
+
+model Review {
+  id         String   @id @default(uuid())
+  bookingId  String   @unique
+  serviceId  String
+  reviewerId String
+  providerId String
+  rating     Int
+  comment    String?
+  isPublic   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  booking  Booking        @relation(fields: [bookingId], references: [id])
+  service  ServiceListing @relation(fields: [serviceId], references: [id])
+  reviewer User           @relation("ReviewsGiven", fields: [reviewerId], references: [id])
+  provider User           @relation("ReviewsReceived", fields: [providerId], references: [id])
+  images   ReviewImage[]
+
+  @@index([bookingId])
+  @@index([serviceId])
+  @@index([providerId])
+  @@index([rating])
+  @@map("reviews")
+}
+
+model ReviewImage {
+  id        String   @id @default(uuid())
+  reviewId  String
+  url       String
+  createdAt DateTime @default(now())
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
+  @@map("review_images")
+}
+
+// ─────────────────────────────────────────
+// SOCIAL
+// ─────────────────────────────────────────
+
+model Follow {
+  id          String   @id @default(uuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower  User @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+  @@map("follows")
+}
+
+model SavedService {
+  id        String   @id @default(uuid())
+  userId    String
+  serviceId String
+  createdAt DateTime @default(now())
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  service ServiceListing @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, serviceId])
+  @@index([userId])
+  @@map("saved_services")
+}
+
+model ServiceLike {
+  id        String   @id @default(uuid())
+  userId    String
+  serviceId String
+  createdAt DateTime @default(now())
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  service ServiceListing @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, serviceId])
+  @@index([userId])
+  @@index([serviceId])
+  @@map("service_likes")
+}
+
+// ─────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  data      Json?
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  emailEnabled        Boolean  @default(true)
+  pushEnabled         Boolean  @default(true)
+  newMessage          Boolean  @default(true)
+  newQuote            Boolean  @default(true)
+  bookingUpdates      Boolean  @default(true)
+  verificationUpdates Boolean  @default(true)
+  newFollowers        Boolean  @default(true)
+  serviceUpdates      Boolean  @default(true)
+  marketing           Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+// ─────────────────────────────────────────
+// DISPUTES
+// ─────────────────────────────────────────
+
+model Dispute {
+  id          String        @id @default(uuid())
+  bookingId   String        @unique
+  raisedById  String
+  providerId  String
+  status      DisputeStatus @default(OPEN)
+  reason      String
+  description String
+  resolution  String?
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  adminNotes  String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  booking    Booking           @relation(fields: [bookingId], references: [id])
+  raisedBy   User              @relation("DisputeRaisedBy", fields: [raisedById], references: [id])
+  provider   User              @relation("DisputeProvider", fields: [providerId], references: [id])
+  evidence   DisputeEvidence[]
+
+  @@index([bookingId])
+  @@index([raisedById])
+  @@index([status])
+  @@map("disputes")
+}
+
+model DisputeEvidence {
+  id          String   @id @default(uuid())
+  disputeId   String
+  uploadedBy  String
+  fileUrl     String
+  fileName    String
+  fileSize    Int
+  mimeType    String
+  description String?
+  createdAt   DateTime @default(now())
+
+  dispute Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  @@index([disputeId])
+  @@map("dispute_evidence")
+}
+
+// ─────────────────────────────────────────
+// UPLOADS
+// ─────────────────────────────────────────
+
+model Upload {
+  id        String        @id @default(uuid())
+  userId    String
+  key       String        @unique
+  url       String
+  fileName  String
+  fileSize  Int
+  mimeType  String
+  purpose   UploadPurpose
+  createdAt DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([purpose])
+  @@map("uploads")
+}
+
+// ─────────────────────────────────────────
+// AUDIT
+// ─────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String
+  resource   String
+  resourceId String?
+  oldData    Json?
+  newData    Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action, resource])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

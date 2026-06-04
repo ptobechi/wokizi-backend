@@ -1,0 +1,81 @@
+version: '3.9'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOCAL DEVELOPMENT — Infrastructure Only
+#
+# This file starts only the three infrastructure services:
+#   • PostgreSQL 16 with PostGIS 3.4 (database)
+#   • Redis 7                         (cache / pub-sub)
+#   • MinIO                           (local S3-compatible file storage)
+#
+# The NestJS API runs directly on your machine (npm run start:dev), NOT in
+# Docker.  Running the API on the host gives you:
+#   • Instant hot-reload (no container rebuild)
+#   • Readable stack traces with source maps
+#   • Direct debugger attachment
+#
+# Usage:
+#   docker compose up -d          ← start all three
+#   docker compose down           ← stop and remove containers (data persists)
+#   docker compose down -v        ← stop AND wipe all data volumes (full reset)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL + PostGIS ───────────────────────────────────────────────────
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: wokizi_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: wokizi
+      POSTGRES_PASSWORD: wokizi_secret
+      POSTGRES_DB: wokizi_db
+    ports:
+      - '5433:5432'           # host 5433 → container 5432 (avoids clash with any local postgres)
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U wokizi -d wokizi_db']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: wokizi_redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── MinIO (local S3) ───────────────────────────────────────────────────────
+  # API:     http://localhost:9000   (used by the backend)
+  # Console: http://localhost:9001   (browser UI — login: minioadmin / minioadmin123)
+  minio:
+    image: minio/minio:latest
+    container_name: wokizi_minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
