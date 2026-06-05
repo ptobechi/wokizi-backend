@@ -510,6 +510,7 @@ model Conversation {
   lastMessage   String?
   isArchived    Boolean   @default(false)
   archivedAt    DateTime?
+  closedReason  String?   // COMPLETED | CANCELLED | REJECTED — set on close
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { BookingStatus, QuotationStatus } from '@prisma/client';
+import { BookingStatus, MessageType, QuotationStatus } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { BookingsRepository } from '../repositories/bookings.repository';
@@ -101,6 +101,48 @@ export class BookingsService {
       body:   `Your booking is now ${dto.status.toLowerCase().replace('_', ' ')}`,
       data:   { bookingId },
     });
+
+    // Auto-close the conversation when the booking lifecycle ends
+    if (dto.status === 'COMPLETED' || dto.status === 'CANCELLED') {
+      const quotation = await this.prisma.quotation.findUnique({
+        where: { id: booking.quotationId },
+        select: { conversationId: true },
+      });
+      if (quotation?.conversationId) {
+        const convId = quotation.conversationId;
+
+        await this.prisma.conversation.update({
+          where: { id: convId },
+          data: { isArchived: true, archivedAt: new Date(), closedReason: dto.status },
+        });
+
+        const systemContent = dto.status === 'COMPLETED'
+          ? 'Service completed. This conversation has been archived. To hire this artisan again, create a new service request.'
+          : 'Booking cancelled. This conversation has been closed. To request service again, create a new service request.';
+
+        const sysMsg = await this.prisma.message.create({
+          data: { conversationId: convId, senderId: userId, type: MessageType.SYSTEM, content: systemContent },
+        });
+
+        this.eventEmitter.emit(EventName.CHAT_MESSAGE, { message: sysMsg, conversationId: convId });
+
+        // Notify both parties
+        const actorId    = userId;
+        const otherParty = isProvider ? booking.customerId : booking.providerId;
+        const archiveBody = dto.status === 'COMPLETED'
+          ? 'Your service request has been completed and archived.'
+          : 'The booking has been cancelled and the conversation has been closed.';
+        for (const uid of [actorId, otherParty]) {
+          this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+            userId: uid,
+            type:   'CONVERSATION_ARCHIVED',
+            title:  'Conversation Archived',
+            body:   archiveBody,
+            data:   { conversationId: convId },
+          });
+        }
+      }
+    }
 
     return updated;
   }

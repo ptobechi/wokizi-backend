@@ -86,8 +86,13 @@ export class ConversationsService {
     return this.repo.markParticipantRead(conversationId, userId);
   }
 
-  async archive(conversationId: string, userId: string) {
+  async archive(conversationId: string, userId: string, reason?: string) {
     await this.ensureParticipant(userId, conversationId);
-    return this.repo.archive(conversationId);
+    return this.repo.archive(conversationId, reason);
+  }
+
+  /** Called internally by booking lifecycle — skips participant check */
+  archiveForBooking(conversationId: string, reason: string) {
+    return this.repo.archive(conversationId, reason);
   }
 }

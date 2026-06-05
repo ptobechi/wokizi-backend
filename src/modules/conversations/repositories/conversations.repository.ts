@@ -9,7 +9,8 @@ export class ConversationsRepository extends BaseRepository {
   findExisting(userA: string, userB: string, serviceId?: string | null) {
     return this.prisma.conversation.findFirst({
       where: {
-        serviceId: serviceId || null,
+        serviceId:  serviceId || null,
+        isArchived: false,
         participants: { every: { userId: { in: [userA, userB] } } },
       },
       include: { participants: true },
@@ -26,10 +27,10 @@ export class ConversationsRepository extends BaseRepository {
     });
   }
 
-  archive(id: string) {
+  archive(id: string, reason?: string) {
     return this.prisma.conversation.update({
       where: { id },
-      data: { isArchived: true, archivedAt: new Date() },
+      data: { isArchived: true, archivedAt: new Date(), ...(reason ? { closedReason: reason } : {}) },
     });
   }
 
