@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ConversationsService, CreateConversationDto } from '../services/conversations.service';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
@@ -21,5 +21,11 @@ export class ConversationsController {
   @ApiOperation({ summary: 'List my conversations' })
   findAll(@CurrentUser('id') userId: string, @Query('page') page: number, @Query('limit') limit: number) {
     return this.conversationsService.findAll(userId, page, limit);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get a single conversation' })
+  findOne(@CurrentUser('id') userId: string, @Param('id') id: string) {
+    return this.conversationsService.findById(id, userId);
   }
 }

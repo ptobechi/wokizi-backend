@@ -1,13 +1,26 @@
-import { IsEnum, IsOptional, IsString, IsArray } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsArray, IsNumber, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { MessageType, MediaType } from '@prisma/client';
 
-export class SendMessageDto {
-  @ApiPropertyOptional() @IsOptional() @IsString() content?: string;
-  @ApiProperty({ enum: MessageType, default: MessageType.TEXT }) @IsEnum(MessageType) type: MessageType;
+export class MessageMediaDto {
+  @ApiProperty()       @IsString()                     url:          string;
+  @ApiPropertyOptional() @IsOptional() @IsString()     thumbnailUrl?: string;
+  @ApiProperty({ enum: MediaType }) @IsEnum(MediaType) mediaType:    MediaType;
+  @ApiPropertyOptional() @IsOptional() @IsString()     fileName?:    string;
+  @ApiPropertyOptional() @IsOptional() @IsNumber()     fileSize?:    number;
+  @ApiPropertyOptional() @IsOptional() @IsString()     mimeType?:    string;
+}
 
-  @ApiPropertyOptional()
+export class SendMessageDto {
+  @ApiPropertyOptional() @IsOptional() @IsString()                         content?: string;
+  @ApiProperty({ enum: MessageType, default: MessageType.TEXT })
+  @IsEnum(MessageType)                                                       type:     MessageType;
+
+  @ApiPropertyOptional({ type: [MessageMediaDto] })
   @IsOptional()
   @IsArray()
-  media?: { url: string; thumbnailUrl?: string; mediaType: MediaType; fileName?: string; fileSize?: number; mimeType?: string }[];
+  @ValidateNested({ each: true })
+  @Type(() => MessageMediaDto)
+                                                                             media?:  MessageMediaDto[];
 }

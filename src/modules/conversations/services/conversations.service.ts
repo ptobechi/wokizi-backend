@@ -1,12 +1,13 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { IsOptional, IsString, IsUUID } from 'class-validator';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { ConversationsRepository } from '../repositories/conversations.repository';
 import { PaginatedResponseDto } from '../../../common/dto/base-response.dto';
 
 export class CreateConversationDto {
-  recipientId: string;
-  serviceId?: string;
-  initialMessage?: string;
+  @IsUUID() recipientId: string;
+  @IsOptional() @IsUUID() serviceId?: string;
+  @IsOptional() @IsString() initialMessage?: string;
 }
 
 @Injectable()
@@ -35,6 +36,13 @@ export class ConversationsService {
       this.repo.countByUser(userId),
     ]);
     return PaginatedResponseDto.of(data, total, page, limit);
+  }
+
+  async findById(conversationId: string, userId: string) {
+    await this.ensureParticipant(userId, conversationId);
+    const conv = await this.repo.findById(conversationId, userId);
+    if (!conv) throw new NotFoundException('Conversation not found');
+    return conv;
   }
 
   async ensureParticipant(userId: string, conversationId: string) {
