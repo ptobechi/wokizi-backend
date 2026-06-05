@@ -8,9 +8,11 @@ export class CreateBookingDto {
 }
 
 export class UpdateBookingStatusDto {
-  @ApiProperty({ enum: ['ACCEPTED','SCHEDULED','IN_PROGRESS','PARTIALLY_COMPLETED','COMPLETED','CANCELLED'] })
+  @ApiProperty({
+    enum: ['CONFIRMED', 'ACCEPTED', 'SCHEDULED', 'IN_PROGRESS', 'PARTIALLY_COMPLETED', 'COMPLETED', 'CANCELLED'],
+  })
   @IsString()
-  status: 'ACCEPTED' | 'SCHEDULED' | 'IN_PROGRESS' | 'PARTIALLY_COMPLETED' | 'COMPLETED' | 'CANCELLED';
+  status: 'CONFIRMED' | 'ACCEPTED' | 'SCHEDULED' | 'IN_PROGRESS' | 'PARTIALLY_COMPLETED' | 'COMPLETED' | 'CANCELLED';
 
   @ApiPropertyOptional() @IsOptional() @IsString() notes?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() scheduledAt?: string;

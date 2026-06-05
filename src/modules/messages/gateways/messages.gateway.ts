@@ -111,6 +111,11 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.server.to(`conversation:${payload.conversationId}`).emit('message:new', payload.message);
   }
 
+  @OnEvent(EventName.NOTIFICATION_NEW)
+  handleNotificationNew(payload: { userId: string; count: number }) {
+    this.sendToUser(payload.userId, 'notification:new', { count: payload.count });
+  }
+
   sendToUser(userId: string, event: string, data: any) {
     this.server.to(`user:${userId}`).emit(event, data);
   }

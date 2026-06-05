@@ -1,10 +1,40 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { QuotationStatus } from '@prisma/client';
+import { QuotationItemType, QuotationStatus } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { QuotationsRepository } from '../repositories/quotations.repository';
-import { CreateQuotationDto, RespondQuotationDto } from '../dto/requests/create-quotation.dto';
+import { CreateQuotationDto, QuotationItemDto, RespondQuotationDto } from '../dto/requests/create-quotation.dto';
 import { EventName } from '../../../common/enums';
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function computeCostsFromItems(items: QuotationItemDto[]) {
+  let labourCost = 0, materialCost = 0, transportationCost = 0, additionalCharges = 0;
+  for (const item of items) {
+    const total = (item.quantity ?? 1) * item.unitPrice;
+    switch (item.type) {
+      case QuotationItemType.LABOUR:      labourCost       += total; break;
+      case QuotationItemType.MATERIAL:    materialCost     += total; break;
+      case QuotationItemType.TRANSPORT:   transportationCost += total; break;
+      case QuotationItemType.ADDITIONAL:  additionalCharges += total; break;
+    }
+  }
+  return { labourCost, materialCost, transportationCost, additionalCharges };
+}
+
+function buildItemsCreate(items: QuotationItemDto[]) {
+  return items.map((item, idx) => ({
+    type:        item.type,
+    name:        item.name,
+    description: item.description,
+    quantity:    item.quantity ?? 1,
+    unitPrice:   item.unitPrice,
+    totalPrice:  (item.quantity ?? 1) * item.unitPrice,
+    sortOrder:   idx,
+  }));
+}
+
+// ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class QuotationsService {
@@ -20,24 +50,48 @@ export class QuotationsService {
     });
     if (!p) throw new ForbiddenException('Not a participant in this conversation');
 
-    const subtotal = (dto.labourCost || 0) + (dto.materialCost || 0) + (dto.transportationCost || 0) + (dto.additionalCharges || 0);
-    const tax = subtotal * ((dto.taxRate || 0) / 100);
+    // If items provided, compute flat costs from them; otherwise use supplied flat values
+    let labourCost         = dto.labourCost         ?? 0;
+    let materialCost       = dto.materialCost       ?? 0;
+    let transportationCost = dto.transportationCost ?? 0;
+    let additionalCharges  = dto.additionalCharges  ?? 0;
+
+    if (dto.items?.length) {
+      const computed = computeCostsFromItems(dto.items);
+      labourCost         = computed.labourCost;
+      materialCost       = computed.materialCost;
+      transportationCost = computed.transportationCost;
+      additionalCharges  = computed.additionalCharges;
+    }
+
+    const subtotal    = labourCost + materialCost + transportationCost + additionalCharges;
+    const tax         = subtotal * ((dto.taxRate ?? 0) / 100);
     const totalAmount = subtotal + tax;
 
     const quotation = await this.repo.create({
-      conversationId: dto.conversationId, serviceId: dto.serviceId, providerId,
-      customerId: dto.customerId, description: dto.description,
-      labourCost: dto.labourCost, materialCost: dto.materialCost || 0,
-      transportationCost: dto.transportationCost || 0, additionalCharges: dto.additionalCharges || 0,
-      taxRate: dto.taxRate || 0, totalAmount, notes: dto.notes,
-      validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
-      status: QuotationStatus.PENDING,
+      conversationId: dto.conversationId,
+      serviceId:      dto.serviceId,
+      providerId,
+      customerId:     dto.customerId,
+      description:    dto.description,
+      labourCost,
+      materialCost,
+      transportationCost,
+      additionalCharges,
+      taxRate:     dto.taxRate ?? 0,
+      totalAmount,
+      notes:       dto.notes,
+      validUntil:  dto.validUntil ? new Date(dto.validUntil) : undefined,
+      status:      QuotationStatus.PENDING,
+      ...(dto.items?.length ? { items: { create: buildItemsCreate(dto.items) } } : {}),
     });
 
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId: dto.customerId, type: 'NEW_QUOTE', title: 'New Quotation',
-      body: `You received a quotation for ₦${totalAmount.toLocaleString()}`,
-      data: { quotationId: quotation.id, conversationId: dto.conversationId },
+      userId: dto.customerId,
+      type:   'NEW_QUOTE',
+      title:  'New Quotation',
+      body:   `You received a quotation for ₦${totalAmount.toLocaleString()}`,
+      data:   { quotationId: quotation.id, conversationId: dto.conversationId },
     });
 
     return quotation;
@@ -46,24 +100,64 @@ export class QuotationsService {
   async revise(quotationId: string, providerId: string, dto: CreateQuotationDto) {
     const original = await this.get(quotationId);
     if (original.providerId !== providerId) throw new ForbiddenException('Not your quotation');
-    if (original.status === QuotationStatus.ACCEPTED || original.status === QuotationStatus.EXPIRED) {
+    if (original.status === QuotationStatus.EXPIRED || original.status === QuotationStatus.REJECTED) {
       throw new BadRequestException('Cannot revise this quotation');
     }
+
+    // Locked once a confirmed booking exists for this quotation
+    const booking = await this.prisma.booking.findFirst({
+      where: { quotationId, status: { not: 'CANCELLED' as any } },
+    });
+    if (booking) throw new BadRequestException('Quotation is locked — a booking has been confirmed');
+
     await this.repo.update(quotationId, { status: QuotationStatus.NEGOTIATING });
 
-    const subtotal = (dto.labourCost || 0) + (dto.materialCost || 0) + (dto.transportationCost || 0) + (dto.additionalCharges || 0);
-    const tax = subtotal * ((dto.taxRate || 0) / 100);
+    let labourCost         = dto.labourCost         ?? 0;
+    let materialCost       = dto.materialCost       ?? 0;
+    let transportationCost = dto.transportationCost ?? 0;
+    let additionalCharges  = dto.additionalCharges  ?? 0;
 
-    return this.repo.create({
-      conversationId: dto.conversationId, serviceId: dto.serviceId,
-      providerId, customerId: dto.customerId, description: dto.description,
-      labourCost: dto.labourCost, materialCost: dto.materialCost || 0,
-      transportationCost: dto.transportationCost || 0, additionalCharges: dto.additionalCharges || 0,
-      taxRate: dto.taxRate || 0, totalAmount: subtotal + tax, notes: dto.notes,
-      validUntil: dto.validUntil ? new Date(dto.validUntil) : undefined,
-      status: QuotationStatus.PENDING, parentId: quotationId,
+    if (dto.items?.length) {
+      const computed = computeCostsFromItems(dto.items);
+      labourCost         = computed.labourCost;
+      materialCost       = computed.materialCost;
+      transportationCost = computed.transportationCost;
+      additionalCharges  = computed.additionalCharges;
+    }
+
+    const subtotal    = labourCost + materialCost + transportationCost + additionalCharges;
+    const tax         = subtotal * ((dto.taxRate ?? 0) / 100);
+    const totalAmount = subtotal + tax;
+
+    const revised = await this.repo.create({
+      conversationId: dto.conversationId,
+      serviceId:      dto.serviceId,
+      providerId,
+      customerId:     dto.customerId,
+      description:    dto.description,
+      labourCost,
+      materialCost,
+      transportationCost,
+      additionalCharges,
+      taxRate:        dto.taxRate ?? 0,
+      totalAmount,
+      notes:          dto.notes,
+      validUntil:     dto.validUntil ? new Date(dto.validUntil) : undefined,
+      status:         QuotationStatus.PENDING,
+      parentId:       quotationId,
       revisionNumber: original.revisionNumber + 1,
+      ...(dto.items?.length ? { items: { create: buildItemsCreate(dto.items) } } : {}),
     });
+
+    this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+      userId: original.customerId,
+      type:   'QUOTE_UPDATED',
+      title:  'Quote Updated',
+      body:   `Your quote was revised to ₦${totalAmount.toLocaleString()}`,
+      data:   { quotationId: revised.id, conversationId: dto.conversationId },
+    });
+
+    return revised;
   }
 
   async respond(quotationId: string, customerId: string, dto: RespondQuotationDto) {
@@ -78,19 +172,31 @@ export class QuotationsService {
     const updateData: any = {};
     let status: QuotationStatus;
 
-    if (dto.action === 'ACCEPTED') { status = QuotationStatus.ACCEPTED; updateData.acceptedAt = new Date(); }
-    else if (dto.action === 'REJECTED') { status = QuotationStatus.REJECTED; updateData.rejectedAt = new Date(); updateData.rejectionReason = dto.rejectionReason; }
-    else { status = QuotationStatus.NEGOTIATING; }
+    if (dto.action === 'ACCEPTED') {
+      status = QuotationStatus.ACCEPTED;
+      updateData.acceptedAt = new Date();
+    } else if (dto.action === 'REJECTED') {
+      status = QuotationStatus.REJECTED;
+      updateData.rejectedAt = new Date();
+      updateData.rejectionReason = dto.rejectionReason;
+    } else {
+      status = QuotationStatus.NEGOTIATING;
+    }
 
     const updated = await this.repo.update(quotationId, { status, ...updateData });
 
-    this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId: quotation.providerId,
-      type: dto.action === 'ACCEPTED' ? 'QUOTE_ACCEPTED' : 'QUOTE_REJECTED',
-      title: dto.action === 'ACCEPTED' ? 'Quotation Accepted!' : 'Quotation Rejected',
-      body: dto.action === 'ACCEPTED' ? 'Your quotation was accepted.' : `Rejected: ${dto.rejectionReason}`,
-      data: { quotationId },
-    });
+    const notifType = dto.action === 'ACCEPTED' ? 'QUOTE_ACCEPTED' : dto.action === 'REJECTED' ? 'QUOTE_REJECTED' : null;
+    if (notifType) {
+      this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+        userId: quotation.providerId,
+        type:   notifType,
+        title:  dto.action === 'ACCEPTED' ? 'Quotation Accepted!' : 'Quotation Rejected',
+        body:   dto.action === 'ACCEPTED'
+          ? 'Your quotation was accepted. Await scheduling.'
+          : `Rejected: ${dto.rejectionReason}`,
+        data:   { quotationId },
+      });
+    }
 
     return updated;
   }

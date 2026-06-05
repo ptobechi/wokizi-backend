@@ -55,8 +55,16 @@ enum QuotationStatus {
   EXPIRED
 }
 
+enum QuotationItemType {
+  LABOUR
+  MATERIAL
+  TRANSPORT
+  ADDITIONAL
+}
+
 enum BookingStatus {
   PENDING
+  CONFIRMED
   ACCEPTED
   SCHEDULED
   IN_PROGRESS
@@ -85,9 +93,11 @@ enum MediaType {
 enum NotificationType {
   NEW_MESSAGE
   NEW_QUOTE
+  QUOTE_UPDATED
   QUOTE_ACCEPTED
   QUOTE_REJECTED
   BOOKING_CREATED
+  BOOKING_CONFIRMED
   BOOKING_ACCEPTED
   BOOKING_SCHEDULED
   BOOKING_IN_PROGRESS
@@ -98,6 +108,7 @@ enum NotificationType {
   VERIFICATION_APPROVED
   VERIFICATION_REJECTED
   NEW_FOLLOWER
+  NEW_SERVICE_REQUEST
   SERVICE_APPROVED
   SERVICE_REJECTED
   SERVICE_SUSPENDED
@@ -497,6 +508,8 @@ model Conversation {
   serviceId     String?
   lastMessageAt DateTime?
   lastMessage   String?
+  isArchived    Boolean   @default(false)
+  archivedAt    DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -505,6 +518,7 @@ model Conversation {
   quotations   Quotation[]
 
   @@index([lastMessageAt])
+  @@index([isArchived])
   @@map("conversations")
 }
 
@@ -600,12 +614,31 @@ model Quotation {
   parent       Quotation?      @relation("QuotationRevisions", fields: [parentId], references: [id])
   revisions    Quotation[]     @relation("QuotationRevisions")
   booking      Booking?
+  items        QuotationItem[]
 
   @@index([conversationId])
   @@index([providerId])
   @@index([customerId])
   @@index([status])
   @@map("quotations")
+}
+
+model QuotationItem {
+  id           String            @id @default(uuid())
+  quotationId  String
+  type         QuotationItemType
+  name         String
+  description  String?
+  quantity     Float             @default(1)
+  unitPrice    Float
+  totalPrice   Float
+  sortOrder    Int               @default(0)
+  createdAt    DateTime          @default(now())
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  @@index([quotationId])
+  @@map("quotation_items")
 }
 
 // ─────────────────────────────────────────

@@ -1,13 +1,55 @@
-import { IsString, IsNumber, IsOptional, Min, IsDateString } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsString, IsNumber, IsOptional, Min, IsDateString,
+  IsEnum, IsArray, ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { QuotationItemType } from '@prisma/client';
+
+export class QuotationItemDto {
+  @ApiProperty({ enum: QuotationItemType })
+  @IsEnum(QuotationItemType)
+  type: QuotationItemType;
+
+  @ApiProperty()
+  @IsString()
+  name: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  @Type(() => Number)
+  quantity?: number;
+
+  @ApiProperty()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  unitPrice: number;
+}
 
 export class CreateQuotationDto {
   @ApiProperty() @IsString() conversationId: string;
   @ApiPropertyOptional() @IsOptional() @IsString() serviceId?: string;
   @ApiProperty() @IsString() customerId: string;
   @ApiProperty() @IsString() description: string;
-  @ApiProperty() @IsNumber() @Min(0) @Type(() => Number) labourCost: number;
+
+  // Line items (new shopping-cart mode)
+  @ApiPropertyOptional({ type: [QuotationItemDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => QuotationItemDto)
+  items?: QuotationItemDto[];
+
+  // Flat cost fields kept for backwards compat; ignored when items are provided
+  @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Type(() => Number) labourCost?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Type(() => Number) materialCost?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Type(() => Number) transportationCost?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Type(() => Number) additionalCharges?: number;

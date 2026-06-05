@@ -1,8 +1,10 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { IsOptional, IsString, IsUUID } from 'class-validator';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { ConversationsRepository } from '../repositories/conversations.repository';
 import { PaginatedResponseDto } from '../../../common/dto/base-response.dto';
+import { EventName } from '../../../common/enums';
 
 export class CreateConversationDto {
   @IsUUID() recipientId: string;
@@ -15,6 +17,7 @@ export class ConversationsService {
   constructor(
     private repo: ConversationsRepository,
     private prisma: PrismaService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   async create(userId: string, dto: CreateConversationDto) {
@@ -26,7 +29,31 @@ export class ConversationsService {
     const existing = await this.repo.findExisting(userId, dto.recipientId, dto.serviceId);
     if (existing && existing.participants.length === 2) return existing;
 
-    return this.repo.create({ userA: userId, userB: dto.recipientId, serviceId: dto.serviceId });
+    const conversation = await this.repo.create({ userA: userId, userB: dto.recipientId, serviceId: dto.serviceId });
+
+    // Notify the recipient of the new service request
+    const senderProfile = await this.prisma.userProfile.findUnique({
+      where: { userId }, select: { displayName: true },
+    });
+    const senderName = senderProfile?.displayName ?? 'Someone';
+
+    let serviceTitle = 'your service';
+    if (dto.serviceId) {
+      const svc = await this.prisma.serviceListing.findUnique({
+        where: { id: dto.serviceId }, select: { title: true },
+      });
+      if (svc) serviceTitle = svc.title;
+    }
+
+    this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+      userId: dto.recipientId,
+      type:   'NEW_SERVICE_REQUEST',
+      title:  'New Service Request',
+      body:   `${senderName} is requesting ${serviceTitle}.`,
+      data:   { conversationId: conversation.id, senderId: userId },
+    });
+
+    return conversation;
   }
 
   async findAll(userId: string, page = 1, limit = 20) {
@@ -57,5 +84,10 @@ export class ConversationsService {
 
   markRead(conversationId: string, userId: string) {
     return this.repo.markParticipantRead(conversationId, userId);
+  }
+
+  async archive(conversationId: string, userId: string) {
+    await this.ensureParticipant(userId, conversationId);
+    return this.repo.archive(conversationId);
   }
 }

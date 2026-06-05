@@ -8,15 +8,17 @@ import { PaginatedResponseDto } from '../../../common/dto/base-response.dto';
 import { EventName } from '../../../common/enums';
 import { InvalidStateException } from '../../../common/exceptions/business.exception';
 
+// CONFIRMED is the post-payment state. Provider can then start work directly.
 const TRANSITIONS: Record<string, string[]> = {
-  PENDING: ['ACCEPTED', 'CANCELLED'],
-  ACCEPTED: ['SCHEDULED', 'CANCELLED'],
-  SCHEDULED: ['IN_PROGRESS', 'CANCELLED'],
-  IN_PROGRESS: ['PARTIALLY_COMPLETED', 'COMPLETED', 'CANCELLED'],
-  PARTIALLY_COMPLETED: ['COMPLETED', 'CANCELLED'],
-  COMPLETED: [],
-  CANCELLED: [],
-  DISPUTED: ['CANCELLED'],
+  PENDING:             ['CONFIRMED', 'ACCEPTED', 'CANCELLED'],
+  CONFIRMED:           ['SCHEDULED', 'IN_PROGRESS', 'CANCELLED'],
+  ACCEPTED:            ['SCHEDULED', 'CANCELLED'],
+  SCHEDULED:           ['IN_PROGRESS', 'CANCELLED'],
+  IN_PROGRESS:         ['PARTIALLY_COMPLETED', 'COMPLETED', 'CANCELLED'],
+  PARTIALLY_COMPLETED: ['COMPLETED', 'SCHEDULED', 'CANCELLED'],
+  COMPLETED:           [],
+  CANCELLED:           [],
+  DISPUTED:            ['CANCELLED'],
 };
 
 @Injectable()
@@ -28,24 +30,34 @@ export class BookingsService {
   ) {}
 
   async create(customerId: string, dto: CreateBookingDto) {
-    const quotation = await this.prisma.quotation.findUnique({ where: { id: dto.quotationId }, include: { service: { select: { title: true } } } });
-    if (!quotation) throw new NotFoundException('Quotation not found');
-    if (quotation.customerId !== customerId) throw new ForbiddenException('Not your quotation');
-    if (quotation.status !== QuotationStatus.ACCEPTED) throw new BadRequestException('Only ACCEPTED quotations can be booked');
+    const quotation = await this.prisma.quotation.findUnique({
+      where: { id: dto.quotationId },
+      include: { service: { select: { title: true } } },
+    });
+    if (!quotation)                                           throw new NotFoundException('Quotation not found');
+    if (quotation.customerId !== customerId)                  throw new ForbiddenException('Not your quotation');
+    if (quotation.status !== QuotationStatus.ACCEPTED)       throw new BadRequestException('Only ACCEPTED quotations can be booked');
 
     const exists = await this.repo.findByQuotationId(dto.quotationId);
     if (exists) throw new BadRequestException('Booking already exists for this quotation');
 
+    // Booking is created as CONFIRMED (payment confirmed by the client)
     const booking = await this.repo.create({
-      customerId, providerId: quotation.providerId, serviceId: quotation.serviceId,
-      quotationId: dto.quotationId, scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
+      customerId,
+      providerId:    quotation.providerId,
+      serviceId:     quotation.serviceId,
+      quotationId:   dto.quotationId,
+      status:        BookingStatus.CONFIRMED,
+      scheduledAt:   dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
       providerNotes: dto.notes,
     });
 
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId: quotation.providerId, type: 'BOOKING_CREATED', title: 'New Booking',
-      body: `New booking for ${(quotation as any).service?.title || 'your service'}`,
-      data: { bookingId: booking.id },
+      userId: quotation.providerId,
+      type:   'BOOKING_CONFIRMED',
+      title:  'Booking Confirmed',
+      body:   `${(quotation as any).service?.title || 'A service'} has been booked and payment confirmed.`,
+      data:   { bookingId: booking.id },
     });
 
     return booking;
@@ -62,15 +74,17 @@ export class BookingsService {
     const allowed = TRANSITIONS[booking.status] || [];
     if (!allowed.includes(dto.status)) throw new InvalidStateException(booking.status, dto.status);
 
-    if (dto.status === 'ACCEPTED' && !isProvider) throw new ForbiddenException('Only provider can accept');
-    if (dto.status === 'COMPLETED' && !isProvider) throw new ForbiddenException('Only provider can complete');
-    if (dto.status === 'CANCELLED' && !dto.cancelReason) throw new BadRequestException('Cancellation reason required');
+    if (dto.status === 'COMPLETED'   && !isProvider) throw new ForbiddenException('Only provider can complete');
+    if (dto.status === 'IN_PROGRESS' && !isProvider) throw new ForbiddenException('Only provider can start work');
+    if (dto.status === 'CANCELLED'   && !dto.cancelReason) throw new BadRequestException('Cancellation reason required');
 
     const updateData: any = { status: dto.status as BookingStatus };
-    if (dto.status === 'COMPLETED') { updateData.completedAt = new Date(); updateData.completionNotes = dto.notes; }
-    if (dto.status === 'CANCELLED') { updateData.cancelledAt = new Date(); updateData.cancelReason = dto.cancelReason; }
-    if (dto.status === 'SCHEDULED' && dto.scheduledAt) updateData.scheduledAt = new Date(dto.scheduledAt);
+    if (dto.status === 'COMPLETED')  { updateData.completedAt = new Date(); updateData.completionNotes = dto.notes; }
+    if (dto.status === 'CANCELLED')  { updateData.cancelledAt = new Date(); updateData.cancelReason = dto.cancelReason; }
     if (dto.status === 'IN_PROGRESS') updateData.startedAt = new Date();
+    if ((dto.status === 'SCHEDULED' || dto.status === 'CONFIRMED') && dto.scheduledAt) {
+      updateData.scheduledAt = new Date(dto.scheduledAt);
+    }
 
     const updated = await this.repo.update(bookingId, updateData);
 
@@ -79,10 +93,13 @@ export class BookingsService {
     }
 
     const notifyId = isProvider ? booking.customerId : booking.providerId;
+    const statusKey = `BOOKING_${dto.status}` as any;
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId: notifyId, type: `BOOKING_${dto.status}` as any,
-      title: `Booking ${dto.status.charAt(0) + dto.status.slice(1).toLowerCase()}`,
-      body: `Your booking is now ${dto.status.toLowerCase()}`, data: { bookingId },
+      userId: notifyId,
+      type:   statusKey,
+      title:  `Booking ${dto.status.charAt(0) + dto.status.slice(1).toLowerCase().replace('_', ' ')}`,
+      body:   `Your booking is now ${dto.status.toLowerCase().replace('_', ' ')}`,
+      data:   { bookingId },
     });
 
     return updated;

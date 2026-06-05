@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ConversationsService } from './services/conversations.service';
 import { ConversationsController } from './controllers/conversations.controller';
 import { ConversationsRepository } from './repositories/conversations.repository';

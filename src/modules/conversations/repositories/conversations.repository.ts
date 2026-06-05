@@ -26,9 +26,16 @@ export class ConversationsRepository extends BaseRepository {
     });
   }
 
+  archive(id: string) {
+    return this.prisma.conversation.update({
+      where: { id },
+      data: { isArchived: true, archivedAt: new Date() },
+    });
+  }
+
   async findAllByUser(userId: string, skip: number, take: number) {
     const rows = await this.prisma.conversation.findMany({
-      where: { participants: { some: { userId } } },
+      where: { participants: { some: { userId } }, isArchived: false },
       include: {
         participants: {
           where: { userId: { not: userId } },
@@ -78,7 +85,7 @@ export class ConversationsRepository extends BaseRepository {
   }
 
   countByUser(userId: string) {
-    return this.prisma.conversation.count({ where: { participants: { some: { userId } } } });
+    return this.prisma.conversation.count({ where: { participants: { some: { userId } }, isArchived: false } });
   }
 
   findParticipant(conversationId: string, userId: string) {

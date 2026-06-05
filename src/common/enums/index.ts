@@ -23,6 +23,7 @@ export enum EventName {
 
   // Notifications
   NOTIFICATION_SEND = 'notification.send',
+  NOTIFICATION_NEW  = 'notification.new',
 
   // Provider
   PROVIDER_METRICS_UPDATE = 'provider.metrics.update',
