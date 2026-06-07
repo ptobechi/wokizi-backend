@@ -115,6 +115,7 @@ export class BookingsService {
           where: { id: convId },
           data: { isArchived: true, archivedAt: new Date(), closedReason: dto.status },
         });
+        console.log(`[TRACE:ARCHIVE] conversation=${convId} isArchived=true closedReason=${dto.status}`);
 
         const systemContent = dto.status === 'COMPLETED'
           ? 'Service completed. This conversation has been archived. To hire this artisan again, create a new service request.'

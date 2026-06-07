@@ -23,6 +23,12 @@ export class ConversationsController {
     return this.conversationsService.findAll(userId, page, limit);
   }
 
+  @Get('archived')
+  @ApiOperation({ summary: 'List archived conversations' })
+  findArchived(@CurrentUser('id') userId: string, @Query('page') page: number, @Query('limit') limit: number) {
+    return this.conversationsService.findAllArchived(userId, page, limit);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get a single conversation' })
   findOne(@CurrentUser('id') userId: string, @Param('id') id: string) {

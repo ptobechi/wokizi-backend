@@ -65,6 +65,16 @@ export class ConversationsService {
     return PaginatedResponseDto.of(data, total, page, limit);
   }
 
+  async findAllArchived(userId: string, page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    const [data, total] = await Promise.all([
+      this.repo.findArchivedByUser(userId, skip, limit),
+      this.repo.countArchivedByUser(userId),
+    ]);
+    console.log(`[TRACE:ARCHIVED] userId=${userId} total=${total} returned=${data.length}`);
+    return PaginatedResponseDto.of(data, total, page, limit);
+  }
+
   async findById(conversationId: string, userId: string) {
     await this.ensureParticipant(userId, conversationId);
     const conv = await this.repo.findById(conversationId, userId);

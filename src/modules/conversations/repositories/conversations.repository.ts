@@ -89,6 +89,35 @@ export class ConversationsRepository extends BaseRepository {
     return this.prisma.conversation.count({ where: { participants: { some: { userId } }, isArchived: false } });
   }
 
+  async findArchivedByUser(userId: string, skip: number, take: number) {
+    const rows = await this.prisma.conversation.findMany({
+      where: { participants: { some: { userId } }, isArchived: true },
+      include: {
+        participants: {
+          where: { userId: { not: userId } },
+          include: { user: { select: { id: true, profile: { select: { displayName: true, avatarUrl: true, city: true } } } } },
+        },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+        _count: { select: { messages: { where: { isRead: false, senderId: { not: userId } } } } },
+      },
+      orderBy: { lastMessageAt: 'desc' },
+      skip,
+      take,
+    });
+
+    return rows.map(({ messages, participants, ...rest }) => ({
+      ...rest,
+      participants: participants.map((p) => ({ id: p.user.id, profile: p.user.profile ?? null })),
+      lastMessage: messages[0]
+        ? { id: messages[0].id, content: messages[0].content, type: messages[0].type, createdAt: messages[0].createdAt, senderId: messages[0].senderId }
+        : null,
+    }));
+  }
+
+  countArchivedByUser(userId: string) {
+    return this.prisma.conversation.count({ where: { participants: { some: { userId } }, isArchived: true } });
+  }
+
   findParticipant(conversationId: string, userId: string) {
     return this.prisma.conversationParticipant.findUnique({
       where: { conversationId_userId: { conversationId, userId } },
