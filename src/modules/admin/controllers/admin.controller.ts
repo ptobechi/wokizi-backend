@@ -1,7 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
-import { IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { AdminService } from '../services/admin.service';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
@@ -10,8 +12,18 @@ import { Roles } from '../../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { ParseUUIDPipe } from '../../../common/pipes/parse-uuid.pipe';
 
-class SuspendUserDto { @IsString() reason: string; }
-class ReviewServiceDto { @IsString() action: 'APPROVED' | 'REJECTED' | 'SUSPENDED'; @IsOptional() @IsString() reason?: string; }
+// ─── DTOs ─────────────────────────────────────────────────────────────────────
+
+class SuspendUserDto      { @IsString() reason: string; }
+class ReviewServiceDto    { @IsString() action: 'APPROVED' | 'REJECTED' | 'SUSPENDED'; @IsOptional() @IsString() reason?: string; }
+class ReviewVerifyDto     { @IsString() @IsIn(['APPROVED', 'REJECTED']) action: 'APPROVED' | 'REJECTED'; @IsOptional() @IsString() reason?: string; }
+class ResolveDisputeDto   { @IsString() resolution: string; @IsOptional() @IsString() notes?: string; }
+class UpdateTicketDto     { @IsOptional() @IsString() status?: string; @IsOptional() @IsString() adminNote?: string; }
+class BroadcastNotifDto   { @IsString() title: string; @IsString() body: string; @IsString() target: 'ALL' | 'PROVIDERS' | 'CUSTOMERS'; @IsOptional() userIds?: string[]; }
+class CreateCategoryDto   { @IsString() name: string; @IsString() slug: string; @IsOptional() @IsString() description?: string; @IsOptional() @IsString() iconUrl?: string; }
+class UpdateCategoryDto   { @IsOptional() @IsString() name?: string; @IsOptional() @IsString() description?: string; @IsOptional() @IsString() iconUrl?: string; @IsOptional() isActive?: boolean; }
+
+// ─── Controller ───────────────────────────────────────────────────────────────
 
 @ApiTags('Admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -21,30 +33,276 @@ class ReviewServiceDto { @IsString() action: 'APPROVED' | 'REJECTED' | 'SUSPENDE
 export class AdminController {
   constructor(private adminService: AdminService) {}
 
-  @Get('dashboard') getDashboard() { return this.adminService.getDashboardStats(); }
+  // ── Dashboard ─────────────────────────────────────────────────────────────
 
-  @Get('users') listUsers(@Query('role') role: string, @Query('isActive') isActive: boolean, @Query('search') search: string, @Query('page') page: number, @Query('limit') limit: number) {
-    return this.adminService.listUsers({ role, isActive, search, page, limit });
+  @Get('dashboard')
+  @ApiOperation({ summary: 'Get platform dashboard stats' })
+  getDashboard() { return this.adminService.getDashboardStats(); }
+
+  // ── Users ─────────────────────────────────────────────────────────────────
+
+  @Get('users')
+  @ApiOperation({ summary: 'List all users with filters' })
+  listUsers(
+    @Query('role') role?: string,
+    @Query('isActive') isActive?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.listUsers({
+      role,
+      isActive: isActive !== undefined ? isActive === 'true' : undefined,
+      search,
+      page:  Number(page)  || 1,
+      limit: Number(limit) || 20,
+    });
+  }
+
+  @Get('users/:id')
+  @ApiOperation({ summary: 'Get user detail' })
+  getUser(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getUserDetail(id);
   }
 
   @Post('users/:id/suspend')
-  suspendUser(@CurrentUser('id') adminId: string, @Param('id', ParseUUIDPipe) userId: string, @Body() dto: SuspendUserDto) {
+  @ApiOperation({ summary: 'Suspend a user' })
+  suspendUser(
+    @CurrentUser('id') adminId: string,
+    @Param('id', ParseUUIDPipe) userId: string,
+    @Body() dto: SuspendUserDto,
+  ) {
     return this.adminService.suspendUser(adminId, userId, dto.reason);
   }
 
   @Post('users/:id/unsuspend')
-  unsuspendUser(@Param('id', ParseUUIDPipe) userId: string) { return this.adminService.unsuspendUser(userId); }
+  @ApiOperation({ summary: 'Unsuspend a user' })
+  unsuspendUser(@Param('id', ParseUUIDPipe) userId: string) {
+    return this.adminService.unsuspendUser(userId);
+  }
 
   @Roles(UserRole.SUPER_ADMIN)
   @Post('users/:id/promote')
-  promote(@Param('id', ParseUUIDPipe) userId: string) { return this.adminService.promoteToAdmin(userId); }
+  @ApiOperation({ summary: '[SuperAdmin] Promote user to Admin' })
+  promote(@Param('id', ParseUUIDPipe) userId: string) {
+    return this.adminService.promoteToAdmin(userId);
+  }
 
-  @Get('services') listServices(@Query('status') status: string, @Query('page') page: number, @Query('limit') limit: number) {
-    return this.adminService.listServices({ status, page, limit });
+  // ── Services ─────────────────────────────────────────────────────────────
+
+  @Get('services')
+  @ApiOperation({ summary: 'List all service listings' })
+  listServices(
+    @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.listServices({ status, page: Number(page) || 1, limit: Number(limit) || 20 });
   }
 
   @Patch('services/:id/review')
-  reviewService(@Param('id', ParseUUIDPipe) id: string, @CurrentUser('id') adminId: string, @Body() dto: ReviewServiceDto) {
+  @ApiOperation({ summary: 'Approve / reject / suspend a service listing' })
+  reviewService(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') adminId: string,
+    @Body() dto: ReviewServiceDto,
+  ) {
     return this.adminService.reviewService(id, adminId, dto.action, dto.reason);
+  }
+
+  // ── Bookings ─────────────────────────────────────────────────────────────
+
+  @Get('bookings')
+  @ApiOperation({ summary: 'List all bookings' })
+  listBookings(
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.listBookings({ status, search, page: Number(page) || 1, limit: Number(limit) || 20 });
+  }
+
+  @Get('bookings/:id')
+  @ApiOperation({ summary: 'Get booking detail' })
+  getBooking(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getBookingDetail(id);
+  }
+
+  // ── Disputes ─────────────────────────────────────────────────────────────
+
+  @Get('disputes')
+  @ApiOperation({ summary: 'List all disputes' })
+  listDisputes(
+    @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.listDisputes({ status, page: Number(page) || 1, limit: Number(limit) || 20 });
+  }
+
+  @Get('disputes/:id')
+  @ApiOperation({ summary: 'Get dispute detail' })
+  getDispute(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.getDisputeDetail(id);
+  }
+
+  @Patch('disputes/:id/resolve')
+  @ApiOperation({ summary: 'Resolve a dispute' })
+  resolveDispute(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') adminId: string,
+    @Body() dto: ResolveDisputeDto,
+  ) {
+    return this.adminService.resolveDispute(id, adminId, dto.resolution, dto.notes);
+  }
+
+  // ── Reviews ───────────────────────────────────────────────────────────────
+
+  @Get('reviews')
+  @ApiOperation({ summary: 'List all reviews' })
+  listReviews(
+    @Query('minRating') minRating?: string,
+    @Query('maxRating') maxRating?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.listReviews({
+      minRating: minRating ? Number(minRating) : undefined,
+      maxRating: maxRating ? Number(maxRating) : undefined,
+      page:  Number(page)  || 1,
+      limit: Number(limit) || 20,
+    });
+  }
+
+  @Delete('reviews/:id')
+  @ApiOperation({ summary: 'Remove a review' })
+  deleteReview(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.deleteReview(id);
+  }
+
+  // ── Analytics ─────────────────────────────────────────────────────────────
+
+  @Get('analytics')
+  @ApiOperation({ summary: 'Platform analytics' })
+  getAnalytics(@Query('period') period?: 'week' | 'month' | 'year') {
+    return this.adminService.getAnalytics(period || 'month');
+  }
+
+  // ── Audit Logs ────────────────────────────────────────────────────────────
+
+  @Get('audit-logs')
+  @ApiOperation({ summary: 'List audit log entries' })
+  getAuditLogs(
+    @Query('action') action?: string,
+    @Query('userId') userId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.listAuditLogs({ action, userId, page: Number(page) || 1, limit: Number(limit) || 50 });
+  }
+
+  // ── Verifications ─────────────────────────────────────────────────────────
+
+  @Get('verifications')
+  @ApiOperation({ summary: 'List KYC verification submissions' })
+  listVerifications(
+    @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.listVerifications({ status, page: Number(page) || 1, limit: Number(limit) || 20 });
+  }
+
+  @Patch('verifications/:id/review')
+  @ApiOperation({ summary: 'Approve or reject a KYC verification' })
+  reviewVerification(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') adminId: string,
+    @Body() dto: ReviewVerifyDto,
+  ) {
+    return this.adminService.reviewVerification(id, adminId, dto.action, dto.reason);
+  }
+
+  // ── Support Tickets ───────────────────────────────────────────────────────
+
+  @Get('support/tickets')
+  @ApiOperation({ summary: 'List support tickets' })
+  listSupportTickets(
+    @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.listSupportTickets({ status, page: Number(page) || 1, limit: Number(limit) || 20 });
+  }
+
+  @Patch('support/tickets/:id')
+  @ApiOperation({ summary: 'Update a support ticket' })
+  updateSupportTicket(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateTicketDto,
+  ) {
+    return this.adminService.updateSupportTicket(id, dto);
+  }
+
+  // ── Notifications ─────────────────────────────────────────────────────────
+
+  @Post('notifications/broadcast')
+  @ApiOperation({ summary: 'Broadcast notification to users' })
+  broadcastNotification(@Body() dto: BroadcastNotifDto) {
+    return this.adminService.broadcastNotification(dto);
+  }
+
+  // ── Categories ────────────────────────────────────────────────────────────
+
+  @Get('categories')
+  @ApiOperation({ summary: 'List all categories' })
+  listCategories() { return this.adminService.listCategories(); }
+
+  @Post('categories')
+  @ApiOperation({ summary: 'Create a new category' })
+  createCategory(@Body() dto: CreateCategoryDto) {
+    return this.adminService.createCategory(dto);
+  }
+
+  @Patch('categories/:id')
+  @ApiOperation({ summary: 'Update a category' })
+  updateCategory(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateCategoryDto,
+  ) {
+    return this.adminService.updateCategory(id, dto);
+  }
+
+  // ── Conversations ─────────────────────────────────────────────────────────
+
+  @Get('conversations')
+  @ApiOperation({ summary: 'List all conversations' })
+  listConversations(
+    @Query('page')   page?:   string,
+    @Query('limit')  limit?:  string,
+    @Query('status') status?: string,
+  ) {
+    return this.adminService.listConversations(
+      page  ? Number(page)  : 1,
+      limit ? Number(limit) : 20,
+      status,
+    );
+  }
+
+  // ── Quotations ────────────────────────────────────────────────────────────
+
+  @Get('quotations')
+  @ApiOperation({ summary: 'List all quotations' })
+  listQuotations(
+    @Query('page')   page?:   string,
+    @Query('limit')  limit?:  string,
+    @Query('status') status?: string,
+  ) {
+    return this.adminService.listQuotations(
+      page  ? Number(page)  : 1,
+      limit ? Number(limit) : 20,
+      status as any,
+    );
   }
 }

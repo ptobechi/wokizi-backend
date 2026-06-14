@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { BookingStatus, MessageType, QuotationStatus } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../core/prisma/prisma.service';
@@ -23,6 +23,8 @@ const TRANSITIONS: Record<string, string[]> = {
 
 @Injectable()
 export class BookingsService {
+  private readonly logger = new Logger(BookingsService.name);
+
   constructor(
     private repo: BookingsRepository,
     private prisma: PrismaService,
@@ -53,11 +55,10 @@ export class BookingsService {
     });
 
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId: quotation.providerId,
-      type:   'BOOKING_CONFIRMED',
-      title:  'Booking Confirmed',
-      body:   `${(quotation as any).service?.title || 'A service'} has been booked and payment confirmed.`,
-      data:   { bookingId: booking.id },
+      userId:   quotation.providerId,
+      type:     'BOOKING_CONFIRMED',
+      ctx:      { serviceName: (quotation as any).service?.title },
+      linkData: { bookingId: booking.id },
     });
 
     return booking;
@@ -92,14 +93,13 @@ export class BookingsService {
       this.eventEmitter.emit(EventName.PROVIDER_METRICS_UPDATE, { providerId: booking.providerId });
     }
 
-    const notifyId = isProvider ? booking.customerId : booking.providerId;
+    const notifyId  = isProvider ? booking.customerId : booking.providerId;
     const statusKey = `BOOKING_${dto.status}` as any;
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId: notifyId,
-      type:   statusKey,
-      title:  `Booking ${dto.status.charAt(0) + dto.status.slice(1).toLowerCase().replace('_', ' ')}`,
-      body:   `Your booking is now ${dto.status.toLowerCase().replace('_', ' ')}`,
-      data:   { bookingId },
+      userId:   notifyId,
+      type:     statusKey,
+      ctx:      { cancelReason: dto.cancelReason },
+      linkData: { bookingId },
     });
 
     // Auto-close the conversation when the booking lifecycle ends
@@ -115,7 +115,7 @@ export class BookingsService {
           where: { id: convId },
           data: { isArchived: true, archivedAt: new Date(), closedReason: dto.status },
         });
-        console.log(`[TRACE:ARCHIVE] conversation=${convId} isArchived=true closedReason=${dto.status}`);
+        this.logger.debug(`Archived conversation ${convId} with reason ${dto.status}`);
 
         const systemContent = dto.status === 'COMPLETED'
           ? 'Service completed. This conversation has been archived. To hire this artisan again, create a new service request.'
@@ -127,19 +127,15 @@ export class BookingsService {
 
         this.eventEmitter.emit(EventName.CHAT_MESSAGE, { message: sysMsg, conversationId: convId });
 
-        // Notify both parties
+        // Notify both parties that the conversation is now archived
         const actorId    = userId;
         const otherParty = isProvider ? booking.customerId : booking.providerId;
-        const archiveBody = dto.status === 'COMPLETED'
-          ? 'Your service request has been completed and archived.'
-          : 'The booking has been cancelled and the conversation has been closed.';
         for (const uid of [actorId, otherParty]) {
           this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-            userId: uid,
-            type:   'CONVERSATION_ARCHIVED',
-            title:  'Conversation Archived',
-            body:   archiveBody,
-            data:   { conversationId: convId },
+            userId:   uid,
+            type:     'CONVERSATION_ARCHIVED',
+            ctx:      { bookingStatus: dto.status },
+            linkData: { conversationId: convId },
           });
         }
       }

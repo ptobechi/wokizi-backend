@@ -44,6 +44,7 @@ import { LikesModule } from './modules/likes/likes.module';
 import { SavedServicesModule } from './modules/saved-services/saved-services.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { SupportModule } from './modules/support/support.module';
 import { HealthModule } from './modules/health/health.module';
 
 @Module({
@@ -89,6 +90,7 @@ import { HealthModule } from './modules/health/health.module';
     SavedServicesModule,
     AdminModule,
     ReportsModule,
+    SupportModule,
     HealthModule,
   ],
 })

@@ -42,6 +42,43 @@ export class UsersService {
     });
   }
 
+  async getSessions(userId: string) {
+    return this.prisma.userDevice.findMany({
+      where: { userId, isActive: true },
+      orderBy: { lastSeenAt: 'desc' },
+      select: {
+        id: true,
+        deviceId: true,
+        deviceType: true,
+        deviceName: true,
+        ipAddress: true,
+        userAgent: true,
+        lastSeenAt: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  async revokeSession(userId: string, deviceId: string) {
+    await this.prisma.userDevice.updateMany({
+      where: { userId, deviceId },
+      data:  { isActive: false },
+    });
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, deviceId },
+      data:  { isRevoked: true },
+    });
+    return { message: 'Session revoked' };
+  }
+
+  async revokeAllSessions(userId: string, currentDeviceId?: string) {
+    const where: any = { userId };
+    if (currentDeviceId) where.deviceId = { not: currentDeviceId };
+    await this.prisma.userDevice.updateMany({ where, data: { isActive: false } });
+    await this.prisma.refreshToken.updateMany({ where: { userId, ...(!currentDeviceId ? {} : { deviceId: { not: currentDeviceId } }) }, data: { isRevoked: true } });
+    return { message: 'All other sessions revoked' };
+  }
+
   async deactivate(userId: string) {
     await this.repo.deactivate(userId);
     return { message: 'Account deactivated' };

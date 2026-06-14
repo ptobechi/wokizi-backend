@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, DefaultValuePipe, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ConversationsService, CreateConversationDto } from '../services/conversations.service';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
@@ -19,13 +19,21 @@ export class ConversationsController {
 
   @Get()
   @ApiOperation({ summary: 'List my conversations' })
-  findAll(@CurrentUser('id') userId: string, @Query('page') page: number, @Query('limit') limit: number) {
+  findAll(
+    @CurrentUser('id') userId: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  ) {
     return this.conversationsService.findAll(userId, page, limit);
   }
 
   @Get('archived')
   @ApiOperation({ summary: 'List archived conversations' })
-  findArchived(@CurrentUser('id') userId: string, @Query('page') page: number, @Query('limit') limit: number) {
+  findArchived(
+    @CurrentUser('id') userId: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  ) {
     return this.conversationsService.findAllArchived(userId, page, limit);
   }
 

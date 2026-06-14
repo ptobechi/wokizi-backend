@@ -30,9 +30,16 @@ export class ReviewsService {
     });
 
     this.eventEmitter.emit(EventName.PROVIDER_METRICS_UPDATE, { providerId: booking.providerId });
+
+    const reviewerProfile = await this.prisma.userProfile.findUnique({
+      where: { userId: reviewerId }, select: { displayName: true },
+    });
+
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId: booking.providerId, type: 'REVIEW_RECEIVED', title: 'New Review',
-      body: `You received a ${dto.rating}-star review`, data: { reviewId: review.id },
+      userId:   booking.providerId,
+      type:     'REVIEW_RECEIVED',
+      ctx:      { userName: reviewerProfile?.displayName, rating: dto.rating },
+      linkData: { reviewId: review.id, bookingId: dto.bookingId },
     });
 
     return review;

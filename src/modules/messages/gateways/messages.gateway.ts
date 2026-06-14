@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { MessagesService } from '../services/messages.service';
 import { SendMessageDto } from '../dto/requests/send-message.dto';
 import { EventName } from '../../../common/enums';
+import { TrackingEvent } from '../../locations/services/tracking.service';
 
 @WebSocketGateway({
   namespace: '/chat',
@@ -114,6 +115,28 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   @OnEvent(EventName.NOTIFICATION_NEW)
   handleNotificationNew(payload: { userId: string; count: number }) {
     this.sendToUser(payload.userId, 'notification:new', { count: payload.count });
+  }
+
+  // ── Tracking events — emitted to the customer watching their artisan ────────
+
+  @OnEvent(TrackingEvent.TRACKING_STARTED)
+  handleTrackingStarted(payload: { bookingId: string; artisanId: string; customerId: string }) {
+    this.sendToUser(payload.customerId, 'tracking:started', payload);
+  }
+
+  @OnEvent(TrackingEvent.LOCATION_UPDATED)
+  handleLocationUpdated(payload: { bookingId: string; artisanId: string; customerId: string; lat: number; lng: number }) {
+    this.sendToUser(payload.customerId, 'tracking:location', payload);
+  }
+
+  @OnEvent(TrackingEvent.ARTISAN_ARRIVED)
+  handleArtisanArrived(payload: { bookingId: string; artisanId: string; customerId: string }) {
+    this.sendToUser(payload.customerId, 'tracking:arrived', payload);
+  }
+
+  @OnEvent(TrackingEvent.TRACKING_STOPPED)
+  handleTrackingStopped(payload: { bookingId: string; artisanId: string; customerId: string }) {
+    this.sendToUser(payload.customerId, 'tracking:stopped', payload);
   }
 
   sendToUser(userId: string, event: string, data: any) {

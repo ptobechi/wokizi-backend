@@ -24,8 +24,6 @@ export class VerificationService {
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
       userId,
       type: 'VERIFICATION_SUBMITTED',
-      title: 'Verification Submitted',
-      body: 'Your verification documents are under review.',
     });
 
     return verification;
@@ -47,11 +45,8 @@ export class VerificationService {
 
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
       userId: (v as any).user.id,
-      type: status === VerificationStatus.APPROVED ? 'VERIFICATION_APPROVED' : 'VERIFICATION_REJECTED',
-      title: status === VerificationStatus.APPROVED ? 'Verified!' : 'Verification Rejected',
-      body: status === VerificationStatus.APPROVED
-        ? 'Your account is now verified. You can publish services.'
-        : `Rejected: ${dto.rejectionReason}`,
+      type:   status === VerificationStatus.APPROVED ? 'VERIFICATION_APPROVED' : 'VERIFICATION_REJECTED',
+      ctx:    { rejectionReason: dto.rejectionReason },
     });
 
     return updated;

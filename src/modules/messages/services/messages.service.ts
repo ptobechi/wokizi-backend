@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MessageType } from '@prisma/client';
 import { MessagesRepository } from '../repositories/messages.repository';
 import { ConversationsService } from '../../conversations/services/conversations.service';
+import { PrismaService } from '../../../core/prisma/prisma.service';
 import { SendMessageDto } from '../dto/requests/send-message.dto';
 import { PaginatedResponseDto } from '../../../common/dto/base-response.dto';
 import { EventName } from '../../../common/enums';
@@ -12,6 +13,7 @@ export class MessagesService {
   constructor(
     private repo: MessagesRepository,
     private conversationsService: ConversationsService,
+    private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
   ) {}
 
@@ -39,14 +41,20 @@ export class MessagesService {
     this.eventEmitter.emit(EventName.CHAT_MESSAGE, { message, conversationId });
 
     const recipients = await this.repo.findParticipants(conversationId, userId);
-    for (const p of recipients) {
-      this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-        userId: p.userId,
-        type: 'NEW_MESSAGE',
-        title: 'New Message',
-        body: dto.content?.substring(0, 100) || 'New attachment',
-        data: { conversationId, messageId: message.id },
+    if (recipients.length) {
+      const senderProfile = await this.prisma.userProfile.findUnique({
+        where: { userId }, select: { displayName: true },
       });
+      const senderName = senderProfile?.displayName ?? 'Someone';
+
+      for (const p of recipients) {
+        this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+          userId:   p.userId,
+          type:     'NEW_MESSAGE',
+          ctx:      { senderName },
+          linkData: { conversationId, messageId: message.id },
+        });
+      }
     }
 
     return message;

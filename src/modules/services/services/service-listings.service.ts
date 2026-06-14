@@ -1,16 +1,19 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ServiceStatus, VerificationStatus } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { ServicesRepository } from '../repositories/services.repository';
 import { CreateServiceDto, UpdateServiceDto } from '../dto/requests/create-service.dto';
 import { generateUniqueSlug } from '../../../common/utils/slug.util';
 import { PaginatedResponseDto } from '../../../common/dto/base-response.dto';
+import { EventName } from '../../../common/enums';
 
 @Injectable()
 export class ServiceListingsService {
   constructor(
     private repo: ServicesRepository,
     private prisma: PrismaService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   async create(userId: string, dto: CreateServiceDto) {
@@ -38,7 +41,15 @@ export class ServiceListingsService {
     if (!verification || verification.status !== VerificationStatus.APPROVED) {
       throw new BadRequestException('Provider verification required before submitting');
     }
-    return this.repo.update(serviceId, { status: ServiceStatus.PENDING_REVIEW });
+    const updated = await this.repo.update(serviceId, { status: ServiceStatus.PENDING_REVIEW });
+
+    this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+      userId,
+      type: 'SERVICE_SUBMITTED',
+      ctx:  { serviceName: service.title },
+    });
+
+    return updated;
   }
 
   async publish(serviceId: string, userId: string) {

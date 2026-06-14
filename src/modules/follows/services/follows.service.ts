@@ -30,9 +30,15 @@ export class FollowsService {
       this.repo.incrementFollowerCount(followingId),
     ]);
 
+    const followerProfile = await this.prisma.userProfile.findUnique({
+      where: { userId: followerId }, select: { displayName: true },
+    });
+
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId: followingId, type: 'NEW_FOLLOWER', title: 'New Follower',
-      body: 'Someone started following you', data: { followerId },
+      userId:   followingId,
+      type:     'NEW_FOLLOWER',
+      ctx:      { userName: followerProfile?.displayName },
+      linkData: { followerId },
     });
 
     return { following: true };

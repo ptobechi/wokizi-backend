@@ -26,9 +26,15 @@ export class DisputesService {
 
     await this.prisma.booking.update({ where: { id: dto.bookingId }, data: { status: BookingStatus.DISPUTED } });
 
+    const raisedByProfile = await this.prisma.userProfile.findUnique({
+      where: { userId: raisedById }, select: { displayName: true },
+    });
+
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId: booking.providerId, type: 'BOOKING_DISPUTED', title: 'Dispute Raised',
-      body: 'A dispute has been raised for a booking', data: { disputeId: dispute.id },
+      userId:   booking.providerId,
+      type:     'BOOKING_DISPUTED',
+      ctx:      { userName: raisedByProfile?.displayName },
+      linkData: { disputeId: dispute.id, bookingId: dto.bookingId },
     });
 
     return dispute;
@@ -55,8 +61,10 @@ export class DisputesService {
 
     for (const userId of [dispute.raisedById, dispute.providerId]) {
       this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-        userId, type: 'BOOKING_DISPUTED', title: `Dispute ${dto.outcome === 'RESOLVED' ? 'Resolved' : 'Closed'}`,
-        body: dto.resolution, data: { disputeId: id },
+        userId,
+        type:     'DISPUTE_RESOLVED',
+        ctx:      { outcome: dto.outcome, resolution: dto.resolution },
+        linkData: { disputeId: id },
       });
     }
 

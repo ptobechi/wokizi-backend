@@ -162,7 +162,7 @@ async function main() {
   // ── Super Admin ────────────────────────────────────────────────────────────
   const admin = await prisma.user.upsert({
     where: { phone: DEMO_PHONES.admin },
-    update: {},
+    update: { role: UserRole.SUPER_ADMIN, isActive: true, isSuspended: false },
     create: {
       phone: DEMO_PHONES.admin,
       role: UserRole.SUPER_ADMIN,
@@ -240,7 +240,14 @@ async function main() {
   // ── Demo Provider ──────────────────────────────────────────────────────────
   const provider = await prisma.user.upsert({
     where: { phone: DEMO_PHONES.provider },
-    update: {},
+    update: {
+      profile: {
+        update: {
+          avgRating: 4.8, totalReviews: 42, completedJobs: 150,
+          completionRate: 95, responseRate: 98, isProvider: true,
+        },
+      },
+    },
     create: {
       phone: DEMO_PHONES.provider,
       isPhoneVerified: true,

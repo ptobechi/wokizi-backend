@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { IsOptional, IsString, IsUUID } from 'class-validator';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../core/prisma/prisma.service';
@@ -14,6 +14,8 @@ export class CreateConversationDto {
 
 @Injectable()
 export class ConversationsService {
+  private readonly logger = new Logger(ConversationsService.name);
+
   constructor(
     private repo: ConversationsRepository,
     private prisma: PrismaService,
@@ -45,12 +47,23 @@ export class ConversationsService {
       if (svc) serviceTitle = svc.title;
     }
 
+    // Notify the provider
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId: dto.recipientId,
-      type:   'NEW_SERVICE_REQUEST',
-      title:  'New Service Request',
-      body:   `${senderName} is requesting ${serviceTitle}.`,
-      data:   { conversationId: conversation.id, senderId: userId },
+      userId:   dto.recipientId,
+      type:     'NEW_SERVICE_REQUEST',
+      ctx:      { userName: senderName, serviceName: serviceTitle },
+      linkData: { conversationId: conversation.id, senderId: userId },
+    });
+
+    // Confirm to the client their request was sent
+    const recipientProfile = await this.prisma.userProfile.findUnique({
+      where: { userId: dto.recipientId }, select: { displayName: true },
+    });
+    this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+      userId:   userId,
+      type:     'SERVICE_REQUEST_SENT',
+      ctx:      { artisanName: recipientProfile?.displayName ?? 'the artisan' },
+      linkData: { conversationId: conversation.id },
     });
 
     return conversation;
@@ -71,7 +84,7 @@ export class ConversationsService {
       this.repo.findArchivedByUser(userId, skip, limit),
       this.repo.countArchivedByUser(userId),
     ]);
-    console.log(`[TRACE:ARCHIVED] userId=${userId} total=${total} returned=${data.length}`);
+    this.logger.debug(`[TRACE:ARCHIVED] userId=${userId} total=${total} returned=${data.length}`);
     return PaginatedResponseDto.of(data, total, page, limit);
   }
 

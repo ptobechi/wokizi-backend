@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, UseGuards, Headers } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsEmail, IsOptional } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -42,6 +42,30 @@ export class UsersController {
   @ApiOperation({ summary: 'Get public user profile' })
   getPublicProfile(@Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.getPublicProfile(id);
+  }
+
+  @Get('me/sessions')
+  @ApiOperation({ summary: 'Get active sessions / devices for current user' })
+  getSessions(@CurrentUser('id') userId: string) {
+    return this.usersService.getSessions(userId);
+  }
+
+  @Delete('me/sessions/:deviceId')
+  @ApiOperation({ summary: 'Revoke a specific device session' })
+  revokeSession(
+    @CurrentUser('id') userId: string,
+    @Param('deviceId') deviceId: string,
+  ) {
+    return this.usersService.revokeSession(userId, deviceId);
+  }
+
+  @Delete('me/sessions')
+  @ApiOperation({ summary: 'Sign out from all other sessions' })
+  revokeAllSessions(
+    @CurrentUser('id') userId: string,
+    @Headers('x-device-id') currentDeviceId?: string,
+  ) {
+    return this.usersService.revokeAllSessions(userId, currentDeviceId);
   }
 
   @Delete('me')

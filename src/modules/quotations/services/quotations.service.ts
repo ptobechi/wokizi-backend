@@ -86,12 +86,15 @@ export class QuotationsService {
       ...(dto.items?.length ? { items: { create: buildItemsCreate(dto.items) } } : {}),
     });
 
+    const providerProfile = await this.prisma.userProfile.findUnique({
+      where: { userId: providerId }, select: { displayName: true },
+    });
+
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId: dto.customerId,
-      type:   'NEW_QUOTE',
-      title:  'New Quotation',
-      body:   `You received a quotation for ₦${totalAmount.toLocaleString()}`,
-      data:   { quotationId: quotation.id, conversationId: dto.conversationId },
+      userId:   dto.customerId,
+      type:     'NEW_QUOTE',
+      ctx:      { artisanName: providerProfile?.displayName },
+      linkData: { quotationId: quotation.id, conversationId: dto.conversationId },
     });
 
     return quotation;
@@ -149,12 +152,15 @@ export class QuotationsService {
       ...(dto.items?.length ? { items: { create: buildItemsCreate(dto.items) } } : {}),
     });
 
+    const reviserProfile = await this.prisma.userProfile.findUnique({
+      where: { userId: providerId }, select: { displayName: true },
+    });
+
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId: original.customerId,
-      type:   'QUOTE_UPDATED',
-      title:  'Quote Updated',
-      body:   `Your quote was revised to ₦${totalAmount.toLocaleString()}`,
-      data:   { quotationId: revised.id, conversationId: dto.conversationId },
+      userId:   original.customerId,
+      type:     'QUOTE_UPDATED',
+      ctx:      { artisanName: reviserProfile?.displayName },
+      linkData: { quotationId: revised.id, conversationId: dto.conversationId },
     });
 
     return revised;
@@ -188,13 +194,10 @@ export class QuotationsService {
     const notifType = dto.action === 'ACCEPTED' ? 'QUOTE_ACCEPTED' : dto.action === 'REJECTED' ? 'QUOTE_REJECTED' : null;
     if (notifType) {
       this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-        userId: quotation.providerId,
-        type:   notifType,
-        title:  dto.action === 'ACCEPTED' ? 'Quotation Accepted!' : 'Quotation Rejected',
-        body:   dto.action === 'ACCEPTED'
-          ? 'Your quotation was accepted. Await scheduling.'
-          : `Rejected: ${dto.rejectionReason}`,
-        data:   { quotationId },
+        userId:   quotation.providerId,
+        type:     notifType,
+        ctx:      { rejectionReason: dto.rejectionReason },
+        linkData: { quotationId },
       });
     }
 
