@@ -11,6 +11,7 @@ import storageConfig from './config/storage.config';
 import websocketConfig from './config/websocket.config';
 import notificationConfig from './config/notification.config';
 import smsConfig from './config/sms.config';
+import paystackConfig from './config/paystack.config';
 
 // Core & Integrations
 import { CoreModule } from './core/core.module';
@@ -46,13 +47,16 @@ import { AdminModule } from './modules/admin/admin.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SupportModule } from './modules/support/support.module';
 import { HealthModule } from './modules/health/health.module';
+import { WalletModule } from './modules/wallet/wallet.module';
+import { PaymentsModule } from './modules/payments/payments.module';
+import { WithdrawalsModule } from './modules/withdrawals/withdrawals.module';
 
 @Module({
   imports: [
     // ─── Global Config ────────────────────────────────────────
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, jwtConfig, redisConfig, storageConfig, websocketConfig, notificationConfig, smsConfig],
+      load: [appConfig, databaseConfig, jwtConfig, redisConfig, storageConfig, websocketConfig, notificationConfig, smsConfig, paystackConfig],
       envFilePath: ['.env.local', '.env'],
     }),
 
@@ -92,6 +96,9 @@ import { HealthModule } from './modules/health/health.module';
     ReportsModule,
     SupportModule,
     HealthModule,
+    WalletModule,
+    PaymentsModule,
+    WithdrawalsModule,
   ],
 })
 export class AppModule implements NestModule {

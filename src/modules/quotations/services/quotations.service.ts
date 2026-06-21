@@ -1,6 +1,6 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { QuotationItemType, QuotationStatus } from '@prisma/client';
+import { PaymentType, QuotationItemType, QuotationStatus } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { QuotationsRepository } from '../repositories/quotations.repository';
 import { CreateQuotationDto, QuotationItemDto, RespondQuotationDto } from '../dto/requests/create-quotation.dto';
@@ -37,12 +37,33 @@ function buildItemsCreate(items: QuotationItemDto[]) {
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
-export class QuotationsService {
+export class QuotationsService implements OnModuleInit {
+  private readonly logger = new Logger(QuotationsService.name);
+
   constructor(
     private repo: QuotationsRepository,
     private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
   ) {}
+
+  onModuleInit() {
+    // Expire stale quotations on startup, then every hour
+    this.expireStaleQuotations();
+    setInterval(() => this.expireStaleQuotations(), 60 * 60 * 1000);
+  }
+
+  private async expireStaleQuotations() {
+    const result = await this.prisma.quotation.updateMany({
+      where: {
+        status: { in: [QuotationStatus.PENDING, QuotationStatus.NEGOTIATING] },
+        validUntil: { lt: new Date(), not: null },
+      },
+      data: { status: QuotationStatus.EXPIRED },
+    });
+    if (result.count > 0) {
+      this.logger.log(`Expired ${result.count} stale quotation(s)`);
+    }
+  }
 
   async create(providerId: string, dto: CreateQuotationDto) {
     const p = await this.prisma.conversationParticipant.findUnique({
@@ -83,6 +104,7 @@ export class QuotationsService {
       notes:       dto.notes,
       validUntil:  dto.validUntil ? new Date(dto.validUntil) : undefined,
       status:      QuotationStatus.PENDING,
+      paymentType: dto.paymentType ?? PaymentType.LABOUR_ONLY,
       ...(dto.items?.length ? { items: { create: buildItemsCreate(dto.items) } } : {}),
     });
 
@@ -147,6 +169,7 @@ export class QuotationsService {
       notes:          dto.notes,
       validUntil:     dto.validUntil ? new Date(dto.validUntil) : undefined,
       status:         QuotationStatus.PENDING,
+      paymentType:    dto.paymentType ?? PaymentType.LABOUR_ONLY,
       parentId:       quotationId,
       revisionNumber: original.revisionNumber + 1,
       ...(dto.items?.length ? { items: { create: buildItemsCreate(dto.items) } } : {}),

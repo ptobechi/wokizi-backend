@@ -34,4 +34,17 @@ export enum EventName {
   // Verification
   VERIFICATION_SUBMITTED = 'verification.submitted',
   VERIFICATION_REVIEWED = 'verification.reviewed',
+
+  // Payments & Wallet
+  PAYMENT_INITIATED     = 'payment.initiated',
+  PAYMENT_COMPLETED     = 'payment.completed',
+  PAYMENT_FAILED        = 'payment.failed',
+  ESCROW_HELD           = 'escrow.held',
+  ESCROW_RELEASED       = 'escrow.released',
+  ESCROW_REFUNDED       = 'escrow.refunded',
+  WALLET_FUNDED         = 'wallet.funded',
+  WITHDRAWAL_REQUESTED  = 'withdrawal.requested',
+  WITHDRAWAL_PROCESSED  = 'withdrawal.processed',
+  TRANSFER_FAILED       = 'transfer.failed',
+  TRANSFER_COMPLETED    = 'transfer.completed',
 }

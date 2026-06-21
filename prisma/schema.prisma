@@ -144,9 +144,18 @@ enum NotificationType {
   WALLET_FUNDED
   PAYMENT_SUCCESSFUL
   PAYMENT_FAILED
+  MATERIAL_FUNDING_REQUIRED
+  MATERIAL_FUNDING_COMPLETED
+  BOOKING_READY_TO_SCHEDULE
+  REFUND_ISSUED
   WITHDRAWAL_REQUESTED
   WITHDRAWAL_APPROVED
   WITHDRAWAL_COMPLETED
+  PAYMENT_RECEIVED
+  TRANSFER_FAILED
+  TRANSFER_COMPLETED
+  ESCROW_HELD
+  ESCROW_RELEASED
 
   // ── System ─────────────────────────────────────────────────────────────
   SYSTEM_MAINTENANCE
@@ -163,6 +172,42 @@ enum DisputeStatus {
   OPEN
   UNDER_REVIEW
   RESOLVED
+  REJECTED
+}
+
+// ─── Payment Enums ────────────────────────────────────────────────────────────
+
+enum PaymentType {
+  LABOUR_ONLY
+  MATERIALS_REQUIRED
+  FULL_PROJECT
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+enum TransactionType {
+  FUNDING
+  PAYMENT
+  ESCROW_HOLD
+  ESCROW_RELEASE
+  EARNING_CREDIT
+  WITHDRAWAL
+  REFUND
+  ADJUSTMENT
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  PROCESSING
+  COMPLETED
   REJECTED
 }
 
@@ -228,6 +273,12 @@ model User {
   trackingAsArtisan     TrackingSession[]        @relation("ArtisanTracking")
   trackingAsCustomer    TrackingSession[]        @relation("CustomerTracking")
   supportTickets        SupportTicket[]
+  contentReports        ContentReport[]
+  wallet                      Wallet?
+  withdrawals                 Withdrawal[]
+  payments                    Payment[]
+  escrowReservationsAsCustomer EscrowReservation[] @relation("EscrowCustomer")
+  escrowReservationsAsProvider EscrowReservation[] @relation("EscrowProvider")
 
   @@index([phone])
   @@index([email])
@@ -641,6 +692,7 @@ model Quotation {
   revisionNumber     Int             @default(1)
   parentId           String?
   status             QuotationStatus @default(DRAFT)
+  paymentType        PaymentType     @default(LABOUR_ONLY)
   description        String
   labourCost         Float           @default(0)
   materialCost       Float           @default(0)
@@ -711,13 +763,15 @@ model Booking {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  customer         User             @relation("CustomerBookings", fields: [customerId], references: [id])
-  provider         User             @relation("ProviderBookings", fields: [providerId], references: [id])
-  service          ServiceListing   @relation(fields: [serviceId], references: [id])
-  quotation        Quotation        @relation(fields: [quotationId], references: [id])
-  review           Review?
-  dispute          Dispute?
-  trackingSession  TrackingSession?
+  customer          User              @relation("CustomerBookings", fields: [customerId], references: [id])
+  provider          User              @relation("ProviderBookings", fields: [providerId], references: [id])
+  service           ServiceListing    @relation(fields: [serviceId], references: [id])
+  quotation         Quotation         @relation(fields: [quotationId], references: [id])
+  review            Review?
+  dispute           Dispute?
+  trackingSession   TrackingSession?
+  escrowReservation EscrowReservation?
+  payments          Payment[]
 
   @@index([customerId])
   @@index([providerId])
@@ -1042,6 +1096,44 @@ model SupportTicket {
 }
 
 // ─────────────────────────────────────────
+// CONTENT REPORTS
+// ─────────────────────────────────────────
+
+enum ReportTargetType {
+  USER
+  SERVICE
+  REVIEW
+  MESSAGE
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  ACTIONED
+  DISMISSED
+}
+
+model ContentReport {
+  id           String           @id @default(uuid())
+  reportedById String
+  targetType   ReportTargetType
+  targetId     String
+  reason       String
+  status       ReportStatus     @default(PENDING)
+  adminNote    String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  reportedBy User @relation(fields: [reportedById], references: [id], onDelete: Cascade)
+
+  @@index([reportedById])
+  @@index([targetType, targetId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("content_reports")
+}
+
+// ─────────────────────────────────────────
 // AUDIT
 // ─────────────────────────────────────────
 
@@ -1063,4 +1155,157 @@ model AuditLog {
   @@index([action, resource])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ─────────────────────────────────────────
+// PAYMENTS & WALLETS
+// ─────────────────────────────────────────
+
+model Wallet {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  balance        Decimal  @default(0) @db.Decimal(18, 2)
+  pendingBalance Decimal  @default(0) @db.Decimal(18, 2)
+  heldBalance    Decimal  @default(0) @db.Decimal(18, 2)
+  currency       String   @default("NGN")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id          String          @id @default(uuid())
+  walletId    String
+  type        TransactionType
+  amount      Decimal         @db.Decimal(18, 2)
+  balanceBefore Decimal       @db.Decimal(18, 2)
+  balanceAfter  Decimal       @db.Decimal(18, 2)
+  reference   String          @unique
+  description String?
+  metadata    Json?
+  createdAt   DateTime        @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("wallet_transactions")
+}
+
+model Payment {
+  id               String        @id @default(uuid())
+  userId           String
+  bookingId        String?
+  quotationId      String?
+  paymentType      PaymentType
+  status           PaymentStatus @default(PENDING)
+  amount           Decimal       @db.Decimal(18, 2)
+  currency         String        @default("NGN")
+  providerName     String        @default("paystack")
+  paystackReference String?      @unique
+  paystackChannel  String?       // card | bank | ussd | bank_transfer | dedicated_nuban
+  reference        String        @unique
+  failureReason    String?
+  metadata         Json?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id])
+  booking Booking? @relation(fields: [bookingId], references: [id])
+  audits  PaymentAudit[]
+
+  @@index([userId])
+  @@index([bookingId])
+  @@index([status])
+  @@index([paystackReference])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+model EscrowReservation {
+  id          String        @id @default(uuid())
+  bookingId   String        @unique
+  customerId  String
+  providerId  String
+  amount      Decimal       @db.Decimal(18, 2)
+  status      PaymentStatus @default(PENDING)
+  releasedAt  DateTime?
+  refundedAt  DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  booking  Booking @relation(fields: [bookingId], references: [id])
+  customer User    @relation("EscrowCustomer", fields: [customerId], references: [id])
+  provider User    @relation("EscrowProvider", fields: [providerId], references: [id])
+
+  @@index([bookingId])
+  @@index([customerId])
+  @@index([providerId])
+  @@index([status])
+  @@map("escrow_reservations")
+}
+
+model Withdrawal {
+  id              String           @id @default(uuid())
+  userId          String
+  amount          Decimal          @db.Decimal(18, 2)
+  currency        String           @default("NGN")
+  status          WithdrawalStatus @default(PENDING)
+  bankName        String
+  bankCode        String           @default("")
+  accountNumber   String
+  accountName     String
+  reference       String           @unique
+  recipientCode   String?          // Paystack recipient code
+  transferCode    String?          // Paystack transfer code
+  adminNote       String?
+  processedAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("withdrawals")
+}
+
+// ─────────────────────────────────────────
+// PAYMENT AUDIT LOG
+// ─────────────────────────────────────────
+
+enum PaymentAuditEvent {
+  INITIALIZED
+  VERIFIED
+  WEBHOOK_RECEIVED
+  ESCROW_CREATED
+  ESCROW_RELEASED
+  ESCROW_REFUNDED
+  REFUND_INITIATED
+  TRANSFER_INITIATED
+  TRANSFER_COMPLETED
+  TRANSFER_FAILED
+  MANUAL_ADJUSTMENT
+}
+
+model PaymentAudit {
+  id        String            @id @default(uuid())
+  paymentId String?
+  event     PaymentAuditEvent
+  data      Json?
+  ipAddress String?
+  createdAt DateTime          @default(now())
+
+  payment Payment? @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
+  @@index([event])
+  @@index([createdAt])
+  @@map("payment_audits")
 }

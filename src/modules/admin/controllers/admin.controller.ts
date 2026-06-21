@@ -11,6 +11,9 @@ import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { ParseUUIDPipe } from '../../../common/pipes/parse-uuid.pipe';
+import { WithdrawalsService } from '../../withdrawals/services/withdrawals.service';
+import { WalletService } from '../../wallet/services/wallet.service';
+import { PaymentsService } from '../../payments/services/payments.service';
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -22,6 +25,7 @@ class UpdateTicketDto     { @IsOptional() @IsString() status?: string; @IsOption
 class BroadcastNotifDto   { @IsString() title: string; @IsString() body: string; @IsString() target: 'ALL' | 'PROVIDERS' | 'CUSTOMERS'; @IsOptional() userIds?: string[]; }
 class CreateCategoryDto   { @IsString() name: string; @IsString() slug: string; @IsOptional() @IsString() description?: string; @IsOptional() @IsString() iconUrl?: string; }
 class UpdateCategoryDto   { @IsOptional() @IsString() name?: string; @IsOptional() @IsString() description?: string; @IsOptional() @IsString() iconUrl?: string; @IsOptional() isActive?: boolean; }
+class ProcessWithdrawalDto { @IsString() action: 'APPROVE' | 'REJECT'; @IsOptional() @IsString() adminNote?: string; }
 
 // ─── Controller ───────────────────────────────────────────────────────────────
 
@@ -31,7 +35,12 @@ class UpdateCategoryDto   { @IsOptional() @IsString() name?: string; @IsOptional
 @ApiBearerAuth('access-token')
 @Controller('admin')
 export class AdminController {
-  constructor(private adminService: AdminService) {}
+  constructor(
+    private adminService: AdminService,
+    private withdrawalsService: WithdrawalsService,
+    private walletService: WalletService,
+    private paymentsService: PaymentsService,
+  ) {}
 
   // ── Dashboard ─────────────────────────────────────────────────────────────
 
@@ -304,5 +313,68 @@ export class AdminController {
       limit ? Number(limit) : 20,
       status as any,
     );
+  }
+
+  // ── Finance — Withdrawals ──────────────────────────────────────────────────
+
+  @Get('finance/withdrawals')
+  @ApiOperation({ summary: 'List all withdrawal requests' })
+  listWithdrawals(
+    @Query('status') status?: string,
+    @Query('page')   page?:   string,
+    @Query('limit')  limit?:  string,
+  ) {
+    return this.withdrawalsService.adminList(status, page ? Number(page) : 1, limit ? Number(limit) : 20);
+  }
+
+  @Patch('finance/withdrawals/:id')
+  @ApiOperation({ summary: 'Approve or reject a withdrawal' })
+  processWithdrawal(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ProcessWithdrawalDto,
+  ) {
+    return this.withdrawalsService.adminProcess(id, dto.action, dto.adminNote);
+  }
+
+  // ── Finance — Wallets ──────────────────────────────────────────────────────
+
+  @Get('finance/wallet/:userId')
+  @ApiOperation({ summary: 'Get a user wallet balance' })
+  getUserWallet(@Param('userId', ParseUUIDPipe) userId: string) {
+    return this.walletService.getWallet(userId);
+  }
+
+  @Get('finance/wallet/:userId/transactions')
+  @ApiOperation({ summary: 'Get a user wallet transaction history' })
+  getUserTransactions(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Query('page')  page?:  string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.walletService.getTransactions(userId, page ? Number(page) : 1, limit ? Number(limit) : 20);
+  }
+
+  // ── Finance — Payments ────────────────────────────────────────────────────
+
+  @Get('finance/payments')
+  @ApiOperation({ summary: 'List all Paystack payment records' })
+  listPayments(
+    @Query('status') status?: string,
+    @Query('page')   page?:   string,
+    @Query('limit')  limit?:  string,
+  ) {
+    return this.paymentsService.adminListPayments(
+      page   ? Number(page)  : 1,
+      limit  ? Number(limit) : 20,
+      status,
+    );
+  }
+
+  // ── Finance — Banks ────────────────────────────────────────────────────────
+
+  @Get('finance/banks')
+  @ApiOperation({ summary: 'List Nigerian banks from Paystack' })
+  listBanks() {
+    return this.withdrawalsService.listBanks();
   }
 }

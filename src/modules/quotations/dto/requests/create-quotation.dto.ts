@@ -4,7 +4,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { QuotationItemType } from '@prisma/client';
+import { PaymentType, QuotationItemType } from '@prisma/client';
 
 export class QuotationItemDto {
   @ApiProperty({ enum: QuotationItemType })
@@ -54,6 +54,11 @@ export class CreateQuotationDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Type(() => Number) transportationCost?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Type(() => Number) additionalCharges?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Type(() => Number) taxRate?: number;
+  @ApiPropertyOptional({ enum: PaymentType })
+  @IsOptional()
+  @IsEnum(PaymentType)
+  paymentType?: PaymentType;
+
   @ApiPropertyOptional() @IsOptional() @IsString() notes?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() validUntil?: string;
 }

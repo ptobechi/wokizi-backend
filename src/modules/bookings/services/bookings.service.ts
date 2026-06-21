@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { BookingStatus, MessageType, QuotationStatus } from '@prisma/client';
+import { BookingStatus, MessageType, PaymentType, QuotationStatus } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { BookingsRepository } from '../repositories/bookings.repository';
@@ -42,6 +42,30 @@ export class BookingsService {
 
     const exists = await this.repo.findByQuotationId(dto.quotationId);
     if (exists) throw new BadRequestException('Booking already exists for this quotation');
+
+    // Payment gate: MATERIALS_REQUIRED and FULL_PROJECT require prior escrow
+    const paymentType = (quotation as any).paymentType as PaymentType;
+    if (paymentType === PaymentType.MATERIALS_REQUIRED || paymentType === PaymentType.FULL_PROJECT) {
+      const escrow = await this.prisma.escrowReservation.findFirst({
+        where: { customerId, status: 'COMPLETED' as any },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!escrow) {
+        throw new BadRequestException(
+          paymentType === PaymentType.MATERIALS_REQUIRED
+            ? 'Material costs must be paid before scheduling this booking'
+            : 'Full project payment is required before scheduling this booking',
+        );
+      }
+    }
+
+    // Validate requested date against provider availability slots
+    if (dto.scheduledAt) {
+      const avail = await this.checkAvailability(quotation.serviceId, dto.scheduledAt);
+      if (!avail.available) {
+        throw new BadRequestException(avail.reason ?? 'Provider is not available on the requested date');
+      }
+    }
 
     // Booking is created as CONFIRMED (payment confirmed by the client)
     const booking = await this.repo.create({
@@ -91,6 +115,10 @@ export class BookingsService {
 
     if (dto.status === 'COMPLETED') {
       this.eventEmitter.emit(EventName.PROVIDER_METRICS_UPDATE, { providerId: booking.providerId });
+      this.eventEmitter.emit(EventName.ESCROW_RELEASED, { bookingId, release: true });
+    }
+    if (dto.status === 'CANCELLED') {
+      this.eventEmitter.emit(EventName.ESCROW_REFUNDED, { bookingId, refund: true });
     }
 
     const notifyId  = isProvider ? booking.customerId : booking.providerId;
