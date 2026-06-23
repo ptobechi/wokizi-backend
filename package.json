@@ -11,7 +11,7 @@
   "scripts": {
     "start": "node dist/main.js",
     "build": "rm -f tsconfig.build.tsbuildinfo && nest build",
-    "postinstall": "prisma generate && npm run build",
+    "postinstall": "prisma generate && npm run build && prisma migrate deploy",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start:dev": "rm -f tsconfig.build.tsbuildinfo && nest start --watch",
     "start:debug": "nest start --debug --watch",

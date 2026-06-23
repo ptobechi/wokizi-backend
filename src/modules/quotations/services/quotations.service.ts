@@ -53,15 +53,19 @@ export class QuotationsService implements OnModuleInit {
   }
 
   private async expireStaleQuotations() {
-    const result = await this.prisma.quotation.updateMany({
-      where: {
-        status: { in: [QuotationStatus.PENDING, QuotationStatus.NEGOTIATING] },
-        validUntil: { lt: new Date(), not: null },
-      },
-      data: { status: QuotationStatus.EXPIRED },
-    });
-    if (result.count > 0) {
-      this.logger.log(`Expired ${result.count} stale quotation(s)`);
+    try {
+      const result = await this.prisma.quotation.updateMany({
+        where: {
+          status: { in: [QuotationStatus.PENDING, QuotationStatus.NEGOTIATING] },
+          validUntil: { lt: new Date(), not: null },
+        },
+        data: { status: QuotationStatus.EXPIRED },
+      });
+      if (result.count > 0) {
+        this.logger.log(`Expired ${result.count} stale quotation(s)`);
+      }
+    } catch (err) {
+      this.logger.error(`Failed to expire stale quotations: ${(err as Error).message}`);
     }
   }
 
