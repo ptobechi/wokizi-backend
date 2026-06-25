@@ -12,8 +12,8 @@ export class UploadsService {
   }
 
   async confirmUpload(userId: string, key: string, fileName: string, fileSize: number, mimeType: string, purpose: UploadPurpose) {
-    const baseUrl = key.startsWith('http') ? key : `https://${process.env.AWS_S3_BUCKET}.s3.amazonaws.com/${key}`;
-    return this.prisma.upload.create({ data: { userId, key, url: baseUrl, fileName, fileSize, mimeType, purpose } });
+    const url = key.startsWith('http') ? key : this.s3.getPublicUrl(key);
+    return this.prisma.upload.create({ data: { userId, key, url, fileName, fileSize, mimeType, purpose } });
   }
 
   async deleteUpload(key: string, userId: string) {

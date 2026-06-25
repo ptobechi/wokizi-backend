@@ -6,5 +6,6 @@ export default registerAs('storage', () => ({
   region: process.env.AWS_REGION || 'us-east-1',
   bucket: process.env.AWS_S3_BUCKET || 'wokizi-media',
   endpoint: process.env.AWS_S3_ENDPOINT || undefined,
+  publicUrl: process.env.STORAGE_PUBLIC_URL || undefined,
   maxFileSizeMb: parseInt(process.env.MAX_FILE_SIZE_MB || '10', 10),
 }));

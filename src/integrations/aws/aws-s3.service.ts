@@ -21,11 +21,13 @@ export class AwsS3Service {
   private readonly s3: S3Client;
   private readonly bucket: string;
   private readonly endpoint?: string;
+  private readonly publicBaseUrl?: string;
   private readonly logger = new Logger(AwsS3Service.name);
 
   constructor(private configService: ConfigService) {
     this.bucket = configService.get<string>('storage.bucket', 'wokizi-media');
     this.endpoint = configService.get<string>('storage.endpoint');
+    this.publicBaseUrl = configService.get<string>('storage.publicUrl');
 
     this.s3 = new S3Client({
       region: configService.get<string>('storage.region', 'us-east-1'),
@@ -58,11 +60,15 @@ export class AwsS3Service {
     });
 
     const uploadUrl = await getSignedUrl(this.s3, command, { expiresIn });
-    const baseUrl = this.endpoint
-      ? `${this.endpoint}/${this.bucket}`
-      : `https://${this.bucket}.s3.amazonaws.com`;
 
-    return { uploadUrl, fileUrl: `${baseUrl}/${key}`, key };
+    return { uploadUrl, fileUrl: this.getPublicUrl(key), key };
+  }
+
+  getPublicUrl(key: string): string {
+    if (this.publicBaseUrl) return `${this.publicBaseUrl}/${key}`;
+    return this.endpoint
+      ? `${this.endpoint}/${this.bucket}/${key}`
+      : `https://${this.bucket}.s3.amazonaws.com/${key}`;
   }
 
   async getPresignedDownloadUrl(key: string, expiresIn = 3600): Promise<string> {
