@@ -76,7 +76,7 @@ export class SearchService {
     const catSlugFilter   = (!categoryId && categorySlug) ? Prisma.sql`AND c.slug = ${categorySlug}` : Prisma.empty;
 
     const distanceFilter = (lat !== null && lng !== null && radius !== null)
-      ? Prisma.sql`AND (up.location IS NULL OR ST_DWithin(up.location, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography, ${radius * 1000}))`
+      ? Prisma.sql`AND up.location IS NOT NULL AND ST_DWithin(up.location, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography, ${radius * 1000})`
       : Prisma.empty;
 
     const [results, countRows] = await Promise.all([
