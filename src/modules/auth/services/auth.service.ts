@@ -1,17 +1,19 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { OtpType } from '@prisma/client';
+import { OtpType, UserRole } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { EncryptionService } from '../../../core/security/encryption.service';
 import { SmsService } from '../../../integrations/sms/sms.service';
 import { SendOtpDto } from '../dto/requests/send-otp.dto';
 import { VerifyPhoneOtpDto } from '../dto/requests/verify-phone-otp.dto';
+import { LoginDto } from '../dto/requests/login.dto';
 
 @Injectable()
 export class AuthService {
@@ -174,6 +176,47 @@ export class AuthService {
         isPhoneVerified: true,
         profile,
       },
+    };
+  }
+
+  // ─── Admin: email + password login ────────────────────────────────────────
+  // Separate credential flow for the admin dashboard only. Regular app users
+  // authenticate exclusively via phone + OTP (see sendOtp/verifyOtp above) —
+  // this path is gated to ADMIN/SUPER_ADMIN roles so it can't become a
+  // shadow login for ordinary customers/providers.
+  async adminLogin(dto: LoginDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+      select: {
+        id: true, phone: true, email: true, role: true,
+        passwordHash: true, isActive: true, isSuspended: true,
+      },
+    });
+
+    if (!user || !user.passwordHash) throw new UnauthorizedException('Invalid credentials');
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Not an admin account');
+    }
+    if (user.isSuspended) throw new UnauthorizedException('Account suspended');
+
+    const passwordMatches = await this.encryption.compare(dto.password, user.passwordHash);
+    if (!passwordMatches) throw new UnauthorizedException('Invalid credentials');
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date(), failedLoginAttempts: 0 },
+    });
+
+    const tokens = await this.issueTokens(user.id, user.phone, user.role, dto.deviceId);
+
+    const profile = await this.prisma.userProfile.findUnique({
+      where: { userId: user.id },
+      select: { displayName: true, avatarUrl: true },
+    });
+
+    return {
+      ...tokens,
+      user: { id: user.id, email: user.email, role: user.role, profile },
     };
   }
 

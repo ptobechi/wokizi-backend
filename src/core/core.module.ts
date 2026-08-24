@@ -8,7 +8,6 @@ import { LoggerModule } from './logger/logger.module';
 import { EventsModule } from './events/events.module';
 import { WebsocketModule } from './websocket/websocket.module';
 import { SecurityModule } from './security/security.module';
-import { MailModule } from './mail/mail.module';
 import { QueueModule } from './queue/queue.module';
 import { DatabaseModule } from './database/database.module';
 
@@ -34,7 +33,6 @@ import { DatabaseModule } from './database/database.module';
     EventsModule,
     WebsocketModule,
     SecurityModule,
-    MailModule,
     QueueModule,
   ],
   exports: [
@@ -45,7 +43,6 @@ import { DatabaseModule } from './database/database.module';
     EventsModule,
     WebsocketModule,
     SecurityModule,
-    MailModule,
     QueueModule,
   ],
 })

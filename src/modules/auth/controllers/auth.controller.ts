@@ -4,7 +4,8 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthService } from '../services/auth.service';
 import { SendOtpDto } from '../dto/requests/send-otp.dto';
 import { VerifyPhoneOtpDto } from '../dto/requests/verify-phone-otp.dto';
-import { SendOtpResponseDto, VerifyOtpResponseDto, RefreshResponseDto } from '../dto/responses/auth.response';
+import { LoginDto } from '../dto/requests/login.dto';
+import { SendOtpResponseDto, VerifyOtpResponseDto, RefreshResponseDto, AdminLoginResponseDto } from '../dto/responses/auth.response';
 import { Public } from '../../../common/decorators/public.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
@@ -61,6 +62,21 @@ export class AuthController {
   @ApiResponse({ status: 200, type: VerifyOtpResponseDto })
   verifyOtp(@Body() dto: VerifyPhoneOtpDto): Promise<VerifyOtpResponseDto> {
     return this.authService.verifyOtp(dto);
+  }
+
+  @Public()
+  @Post('admin/login')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60_000, limit: 10 } }) // max 10 login attempts per minute per IP
+  @ApiOperation({
+    summary: 'Admin dashboard login — email + password',
+    description:
+      'Separate credential flow reserved for ADMIN/SUPER_ADMIN accounts. ' +
+      'Regular app users never use this — they authenticate via phone + OTP.',
+  })
+  @ApiResponse({ status: 200, type: AdminLoginResponseDto })
+  adminLogin(@Body() dto: LoginDto): Promise<AdminLoginResponseDto> {
+    return this.authService.adminLogin(dto);
   }
 
   @Public()

@@ -6,6 +6,7 @@ import { ServiceStatus, UserRole, DisputeStatus, VerificationStatus, QuotationSt
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { PaginatedResponseDto } from '../../../common/dto/base-response.dto';
 import { EventName } from '../../../common/enums';
+import { publishFields, unpublishFields, suspendPublicationFields } from '../../services/utils/service-publication.util';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -160,10 +161,34 @@ export class AdminService {
     const service = await this.prisma.serviceListing.findUnique({ where: { id: serviceId } });
     if (!service) throw new NotFoundException('Service not found');
     const statusMap: Record<string, ServiceStatus> = { APPROVED: ServiceStatus.APPROVED, REJECTED: ServiceStatus.REJECTED, SUSPENDED: ServiceStatus.SUSPENDED };
+
+    // Approval must publish the service immediately — see service-publication.util.ts
+    // for why these three transitions are centralized in one place.
+    const publicationFields =
+      action === 'APPROVED' ? publishFields()
+      : action === 'SUSPENDED' ? suspendPublicationFields()
+      : unpublishFields(); // REJECTED
+
     const updated = await this.prisma.serviceListing.update({
       where: { id: serviceId },
-      data: { status: statusMap[action], reviewedBy: adminId, reviewedAt: new Date(), rejectionReason: action !== 'APPROVED' ? reason : null, isPublished: action === 'APPROVED' ? service.isPublished : false },
+      data: {
+        status: statusMap[action], reviewedBy: adminId, reviewedAt: new Date(),
+        rejectionReason: action !== 'APPROVED' ? reason : null,
+        ...publicationFields,
+      },
     });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: adminId,
+        action: `SERVICE_${action}`,
+        resource: 'ServiceListing',
+        resourceId: serviceId,
+        oldData: { status: service.status, isPublished: service.isPublished, publishedAt: service.publishedAt },
+        newData: { status: updated.status, isPublished: updated.isPublished, publishedAt: updated.publishedAt },
+      },
+    });
+
     const notifMap: Record<string, string> = { APPROVED: 'SERVICE_APPROVED', REJECTED: 'SERVICE_REJECTED', SUSPENDED: 'SERVICE_SUSPENDED' };
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
       userId: service.providerId, type: notifMap[action],

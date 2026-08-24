@@ -24,7 +24,7 @@ export class ResendService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          from: from || 'Wokizi <no-reply@wokizi.com>',
+          from: from || 'Wokizi <noreply@wokizy.app>',
           to,
           subject,
           html,

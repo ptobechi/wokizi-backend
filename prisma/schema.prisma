@@ -46,6 +46,25 @@ enum ServiceStatus {
   SUSPENDED
 }
 
+enum ServiceType {
+  LABOUR
+  MATERIALS
+  BOTH
+}
+
+enum PricingModel {
+  FIXED_PRICE
+  CUSTOM_QUOTE
+}
+
+enum ResponseTime {
+  WITHIN_30_MIN
+  WITHIN_1_HOUR
+  WITHIN_FEW_HOURS
+  WITHIN_24_HOURS
+  WITHIN_2_3_DAYS
+}
+
 enum QuotationStatus {
   DRAFT
   PENDING
@@ -452,12 +471,25 @@ model ServiceListing {
   title           String
   slug            String        @unique
   description     String
+  shortDescription String?
   startingPrice   Float
   minPrice        Float?
   maxPrice        Float?
   serviceRadius   Int           @default(10)
+  serviceType     ServiceType   @default(BOTH)
+  responseTime    ResponseTime  @default(WITHIN_1_HOUR)
+  pricingModel    PricingModel  @default(FIXED_PRICE)
+  materialHandlingFee  Float?
+  minimumServiceCharge Float?
+  extraCharges    Json?
+  whatsIncluded   String?
+  whatsNotIncluded String?
+  toolsEquipment  String?
+  customerRequirements String?
+  isEmergency     Boolean       @default(false)
   status          ServiceStatus @default(DRAFT)
   isPublished     Boolean       @default(false)
+  publishedAt     DateTime?
   reviewNotes     String?
   rejectionReason String?
   reviewedBy      String?
@@ -559,6 +591,9 @@ model Availability {
   isVacationMode Boolean   @default(false)
   vacationStart  DateTime?
   vacationEnd    DateTime?
+  breakStartTime String?
+  breakEndTime   String?
+  advanceBookingHours Int  @default(24)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

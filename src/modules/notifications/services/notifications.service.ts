@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
-import { FirebaseService } from '../../../integrations/firebase/firebase.service';
+import { ExpoService } from '../../../integrations/expo/expo.service';
 import { PaginatedResponseDto } from '../../../common/dto/base-response.dto';
 
 interface NotificationPayload {
@@ -12,12 +12,36 @@ interface NotificationPayload {
   data?: Record<string, any>;
 }
 
+interface RegisterDeviceInput {
+  token: string;
+  deviceId: string;
+  deviceType?: string;
+}
+
 @Injectable()
 export class NotificationsService {
   constructor(
     private prisma: PrismaService,
-    private firebase: FirebaseService,
+    private expo: ExpoService,
   ) {}
+
+  // Called by the mobile app once a push permission is granted (and again on
+  // every authenticated app start, since Expo tokens can rotate). Upserts by
+  // (userId, deviceId) — the same key auth.service.ts's OTP-verify device
+  // upsert uses — so a device registered here or at login converges to one row.
+  async registerDevice(userId: string, dto: RegisterDeviceInput) {
+    await this.prisma.userDevice.upsert({
+      where: { userId_deviceId: { userId, deviceId: dto.deviceId } },
+      update: { fcmToken: dto.token, isActive: true, lastSeenAt: new Date() },
+      create: {
+        userId,
+        deviceId: dto.deviceId,
+        deviceType: dto.deviceType ?? 'mobile',
+        fcmToken: dto.token,
+      },
+    });
+    return { message: 'Device registered' };
+  }
 
   async send(payload: NotificationPayload) {
     const prefs = await this.prisma.notificationPreference.findUnique({ where: { userId: payload.userId } });
@@ -69,7 +93,7 @@ export class NotificationsService {
     });
     const tokens = devices.map(d => d.fcmToken).filter(Boolean) as string[];
     if (tokens.length) {
-      await this.firebase.sendToTokens(tokens, { title: payload.title, body: payload.body });
+      await this.expo.sendToTokens(tokens, { title: payload.title, body: payload.body });
     }
   }
 }

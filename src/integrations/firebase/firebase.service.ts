@@ -7,6 +7,12 @@ interface PushPayload {
   data?: Record<string, string>;
 }
 
+// NOT currently used for sending push notifications — the mobile app
+// registers Expo push tokens (Notifications.getExpoPushTokenAsync), not raw
+// FCM/APNs device tokens, so NotificationsService sends via
+// integrations/expo/expo.service.ts instead. sendToToken/sendToTokens here
+// expect a real FCM registration token and will fail if given an Expo token.
+// Kept in case a future native-token flow needs direct FCM delivery.
 @Injectable()
 export class FirebaseService implements OnModuleInit {
   private readonly logger = new Logger(FirebaseService.name);

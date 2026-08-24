@@ -1,8 +1,15 @@
-import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { IsOptional, IsString } from 'class-validator';
 import { NotificationsService } from '../services/notifications.service';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
+
+class RegisterDeviceDto {
+  @IsString() token: string;
+  @IsString() deviceId: string;
+  @IsOptional() @IsString() deviceType?: string;
+}
 
 @ApiTags('Notifications')
 @UseGuards(JwtAuthGuard)
@@ -10,6 +17,12 @@ import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 @Controller('notifications')
 export class NotificationsController {
   constructor(private notificationsService: NotificationsService) {}
+
+  @Post('register-token')
+  @ApiOperation({ summary: 'Register or refresh this device\'s Expo push token' })
+  registerToken(@CurrentUser('id') userId: string, @Body() dto: RegisterDeviceDto) {
+    return this.notificationsService.registerDevice(userId, dto);
+  }
 
   @Get()
   getMine(@CurrentUser('id') userId: string, @Query('page') page: number, @Query('limit') limit: number) {

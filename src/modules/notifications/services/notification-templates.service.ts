@@ -199,7 +199,7 @@ const TEMPLATES: Partial<Record<NotificationType, TemplateFactory>> = {
 
   SERVICE_APPROVED: ({ serviceName }) => ({
     title: 'Service Approved',
-    body: `"${serviceName ?? 'Your service'}" has been approved and is now visible to clients in your area.`,
+    body: `Congratulations! "${serviceName ?? 'Your service'}" has been approved and is now live. Customers can now discover and book your service.`,
   }),
 
   SERVICE_SUBMITTED: ({ serviceName }) => ({

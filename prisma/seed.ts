@@ -1,4 +1,5 @@
 import { PrismaClient, UserRole } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
@@ -7,6 +8,11 @@ const DEMO_PHONES = {
   provider: '+2348012345678',
   customer: '+2348087654321',
 };
+
+// Admin dashboard login (email + password) — mobile app users never use this,
+// they authenticate via phone + OTP only. See AuthService.adminLogin.
+const ADMIN_EMAIL = 'admin@wokizi.com';
+const ADMIN_PASSWORD = 'Wokizi@Admin123';
 
 // ─── Category seed data ───────────────────────────────────────────────────────
 
@@ -160,11 +166,17 @@ async function main() {
   console.log('Seeding database...\n');
 
   // ── Super Admin ────────────────────────────────────────────────────────────
+  const adminPasswordHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
   const admin = await prisma.user.upsert({
     where: { phone: DEMO_PHONES.admin },
-    update: { role: UserRole.SUPER_ADMIN, isActive: true, isSuspended: false },
+    update: {
+      role: UserRole.SUPER_ADMIN, isActive: true, isSuspended: false,
+      email: ADMIN_EMAIL, passwordHash: adminPasswordHash,
+    },
     create: {
       phone: DEMO_PHONES.admin,
+      email: ADMIN_EMAIL,
+      passwordHash: adminPasswordHash,
       role: UserRole.SUPER_ADMIN,
       isPhoneVerified: true,
       isActive: true,
@@ -174,7 +186,7 @@ async function main() {
       notificationPrefs: { create: {} },
     },
   });
-  console.log(`✓ Admin:    ${admin.phone}`);
+  console.log(`✓ Admin:    ${admin.phone} (dashboard login: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD})`);
 
   // ── Categories & Subcategories ─────────────────────────────────────────────
   // Both `name` and `slug` are unique so we can't use a single upsert safely
@@ -355,6 +367,9 @@ async function main() {
   console.log('  Admin:    ' + DEMO_PHONES.admin);
   console.log('  Provider: ' + DEMO_PHONES.provider);
   console.log('  Customer: ' + DEMO_PHONES.customer);
+  console.log('─'.repeat(52));
+  console.log('  Admin dashboard login (POST /api/v1/auth/admin/login):');
+  console.log(`    ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
   console.log('═'.repeat(52));
 }
 

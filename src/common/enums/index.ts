@@ -14,9 +14,6 @@ export enum EventName {
   USER_REGISTERED = 'user.registered',
   USER_LOGGED_IN = 'user.logged_in',
 
-  // Mail
-  MAIL_SEND = 'mail.send',
-
   // Chat
   CHAT_MESSAGE = 'chat.message',
   CHAT_SYSTEM_MESSAGE = 'chat.system-message',

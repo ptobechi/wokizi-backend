@@ -40,3 +40,22 @@ export class RefreshResponseDto {
   @ApiProperty()
   refreshToken: string;
 }
+
+export class AdminLoginResponseDto {
+  @ApiProperty()
+  accessToken: string;
+
+  @ApiProperty()
+  refreshToken: string;
+
+  @ApiProperty()
+  user: {
+    id: string;
+    email: string;
+    role: string;
+    profile: {
+      displayName: string | null;
+      avatarUrl: string | null;
+    } | null;
+  };
+}

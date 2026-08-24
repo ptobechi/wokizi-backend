@@ -7,6 +7,7 @@ import { CreateServiceDto, UpdateServiceDto } from '../dto/requests/create-servi
 import { generateUniqueSlug } from '../../../common/utils/slug.util';
 import { PaginatedResponseDto } from '../../../common/dto/base-response.dto';
 import { EventName } from '../../../common/enums';
+import { publishFields, unpublishFields } from '../utils/service-publication.util';
 
 @Injectable()
 export class ServiceListingsService {
@@ -17,10 +18,13 @@ export class ServiceListingsService {
   ) {}
 
   async create(userId: string, dto: CreateServiceDto) {
-    const { images, availabilitySlots, ...data } = dto;
+    const { images, availabilitySlots, breakStartTime, breakEndTime, advanceBookingHours, ...data } = dto;
 
     const category = await this.prisma.category.findUnique({ where: { id: dto.categoryId } });
     if (!category) throw new NotFoundException('Category not found');
+
+    const hasAvailabilityData =
+      !!availabilitySlots?.length || breakStartTime !== undefined || breakEndTime !== undefined || advanceBookingHours !== undefined;
 
     return this.repo.create({
       ...data,
@@ -28,7 +32,16 @@ export class ServiceListingsService {
       providerId: userId,
       status: ServiceStatus.DRAFT,
       images: images?.length ? { create: images.map((img, i) => ({ ...img, sortOrder: i, isPrimary: i === 0 })) } : undefined,
-      availability: availabilitySlots?.length ? { create: { slots: { create: availabilitySlots } } } : undefined,
+      availability: hasAvailabilityData
+        ? {
+            create: {
+              breakStartTime,
+              breakEndTime,
+              advanceBookingHours,
+              slots: availabilitySlots?.length ? { create: availabilitySlots } : undefined,
+            },
+          }
+        : undefined,
     });
   }
 
@@ -55,12 +68,12 @@ export class ServiceListingsService {
   async publish(serviceId: string, userId: string) {
     const service = await this.getOwned(serviceId, userId);
     if (service.status !== ServiceStatus.APPROVED) throw new BadRequestException('Only APPROVED services can be published');
-    return this.repo.update(serviceId, { isPublished: true });
+    return this.repo.update(serviceId, publishFields());
   }
 
   async unpublish(serviceId: string, userId: string) {
     await this.getOwned(serviceId, userId);
-    return this.repo.update(serviceId, { isPublished: false });
+    return this.repo.update(serviceId, unpublishFields());
   }
 
   async update(serviceId: string, userId: string, dto: UpdateServiceDto) {
@@ -70,7 +83,40 @@ export class ServiceListingsService {
       const cat = await this.prisma.category.findUnique({ where: { id: dto.categoryId } });
       if (!cat) throw new NotFoundException('Category not found');
     }
-    return this.repo.update(serviceId, { ...dto, status: ServiceStatus.DRAFT });
+
+    const { images, availabilitySlots, breakStartTime, breakEndTime, advanceBookingHours, ...data } = dto;
+
+    const hasAvailabilityData =
+      !!availabilitySlots?.length || breakStartTime !== undefined || breakEndTime !== undefined || advanceBookingHours !== undefined;
+
+    if (hasAvailabilityData) {
+      await this.prisma.availability.upsert({
+        where: { serviceId },
+        create: {
+          serviceId,
+          breakStartTime,
+          breakEndTime,
+          advanceBookingHours,
+          slots: availabilitySlots?.length ? { create: availabilitySlots } : undefined,
+        },
+        update: {
+          breakStartTime,
+          breakEndTime,
+          advanceBookingHours,
+          ...(availabilitySlots?.length
+            ? { slots: { deleteMany: {}, create: availabilitySlots } }
+            : {}),
+        },
+      });
+    }
+
+    return this.repo.update(serviceId, {
+      ...data,
+      status: ServiceStatus.DRAFT,
+      images: images?.length
+        ? { deleteMany: {}, create: images.map((img, i) => ({ ...img, sortOrder: i, isPrimary: i === 0 })) }
+        : undefined,
+    });
   }
 
   async findMyServices(userId: string, page = 1, limit = 20) {

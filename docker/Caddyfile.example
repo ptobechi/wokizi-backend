@@ -1,0 +1,12 @@
+# Copy to /etc/caddy/Caddyfile on the VPS (after `apt install caddy`), replace
+# the domain, then `systemctl reload caddy`. Caddy handles TLS certificate
+# issuance/renewal automatically via Let's Encrypt — no certbot, no manual
+# cert management.
+#
+# This assumes docker-compose.prod.yml's `app` service is bound to
+# 127.0.0.1:3000 (as written) — Caddy runs on the host (not in Docker) and
+# proxies straight to it.
+
+api.your-domain.com {
+	reverse_proxy 127.0.0.1:3000
+}
