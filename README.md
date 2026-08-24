@@ -119,11 +119,11 @@ Copy `.env.example` to `.env` and set all values.
 | `THROTTLE_LIMIT` | Max requests per window (default: `100`) |
 | `OTP_EXPIRES_MINUTES` | OTP validity in minutes (default: `10`) |
 | `OTP_MAX_ATTEMPTS` | Max OTP verification attempts (default: `5`) |
-| `SMTP_HOST` | SMTP host (optional; OTP logs to console in dev) |
-| `SMTP_PORT` | SMTP port |
-| `SMTP_USER` | SMTP username |
-| `SMTP_PASS` | SMTP password |
-| `SMTP_FROM` | From address |
+| `RESEND_API_KEY` | Resend transactional email API key (optional) |
+| `PAYSTACK_SECRET_KEY` | Paystack secret key — **required in production**; payments/withdrawals no-op only while `NODE_ENV != production` |
+| `PAYSTACK_PUBLIC_KEY` | Paystack public key |
+| `PAYSTACK_WEBHOOK_SECRET` | Paystack webhook signature secret |
+| `WS_ALLOWED_ORIGINS` | Comma-separated CORS origins for Socket.IO. Defaults to `*` — **must be restricted in production** |
 
 ---
 
@@ -292,3 +292,4 @@ npm run db:up              # Start docker services
 npm run db:down            # Stop docker services
 npm run db:reset           # Destroy and reseed (dev only)
 ```
+# wokizy
