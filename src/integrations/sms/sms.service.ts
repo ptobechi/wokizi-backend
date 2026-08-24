@@ -10,16 +10,20 @@ export interface SmsSendResult {
 @Injectable()
 export class SmsService {
   private readonly logger = new Logger(SmsService.name);
-  private readonly isDev: boolean;
 
-  constructor(private configService: ConfigService) {
-    this.isDev = configService.get<string>('app.nodeEnv', 'development') !== 'production';
-  }
+  constructor(private configService: ConfigService) {}
 
   async sendOtp(phone: string, code: string): Promise<SmsSendResult> {
     const message = `Your Wokizi verification code is ${code}. Valid for 10 minutes. Do not share this code.`;
 
-    if (this.isDev) {
+    // Falls back to console-logging whenever there's no real Termii key
+    // configured — independent of NODE_ENV, so this works correctly during
+    // a "real" production deploy that just hasn't gone live with Termii
+    // yet, without needing to flip NODE_ENV (which would also disable
+    // Paystack's live mode and expose Swagger publicly — see sms.service.ts
+    // git history / commit message for why this isn't gated on nodeEnv).
+    const apiKey = this.configService.get<string>('sms.termiiApiKey');
+    if (!apiKey) {
       return this.sendDevOtp(phone, code, message);
     }
 
