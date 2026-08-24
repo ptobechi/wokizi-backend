@@ -1,6 +1,6 @@
 # Wokizi Backend API
 
-Hyperlocal Artisan & Service Marketplace — NestJS 11 + PostgreSQL/PostGIS + Redis + Socket.IO
+Hyperlocal Artisan & Service Marketplace — NestJS 11 + PostgreSQL/PostGIS + Socket.IO
 
 Deployed at: `https://wokizi-045ca9212da0.herokuapp.com/api/v1`
 
@@ -14,7 +14,6 @@ Deployed at: `https://wokizi-045ca9212da0.herokuapp.com/api/v1`
 | Language | TypeScript | `^5.7.3` |
 | ORM | Prisma | `^5.17.0` |
 | Database | PostgreSQL 16 + PostGIS | — |
-| Cache / Pub-Sub | Redis via ioredis | `^5.4.1` |
 | Real-time | Socket.IO | `^4.7.5` |
 | File Storage | Cloudflare R2 (S3-compatible) | AWS SDK `^3.600.0` |
 | Push Notifications | Firebase Admin (FCM) | `^12.3.0` |
@@ -33,7 +32,7 @@ cd backend
 # 1. Copy and configure environment
 cp .env.example .env
 
-# 2. Start Postgres (PostGIS), Redis, and MinIO
+# 2. Start Postgres (PostGIS) and MinIO
 docker compose up -d
 
 # 3. Install dependencies
@@ -62,7 +61,6 @@ npm run start:dev
 
 - Node.js 22.x
 - PostgreSQL 16 with PostGIS extension
-- Redis 7
 
 ### PostGIS setup (one-time)
 
@@ -100,10 +98,6 @@ Copy `.env.example` to `.env` and set all values.
 | `JWT_ACCESS_EXPIRES_IN` | Access token TTL (default: `15m`) |
 | `JWT_REFRESH_SECRET` | Refresh token signing secret (min 32 chars) |
 | `JWT_REFRESH_EXPIRES_IN` | Refresh token TTL (default: `30d`) |
-| `REDIS_HOST` | Redis host |
-| `REDIS_PORT` | Redis port (default: `6379`) |
-| `REDIS_PASSWORD` | Redis password |
-| `REDIS_DB` | Redis DB index (default: `0`) |
 | `AWS_ACCESS_KEY_ID` | Cloudflare R2 access key |
 | `AWS_SECRET_ACCESS_KEY` | Cloudflare R2 secret key |
 | `AWS_REGION` | R2 region (`auto`) |

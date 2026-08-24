@@ -3,9 +3,8 @@ version: '3.9'
 # ─────────────────────────────────────────────────────────────────────────────
 # LOCAL DEVELOPMENT — Infrastructure Only
 #
-# This file starts only the three infrastructure services:
+# This file starts only the infrastructure services:
 #   • PostgreSQL 16 with PostGIS 3.4 (database)
-#   • Redis 7                         (cache / pub-sub)
 #   • MinIO                           (local S3-compatible file storage)
 #
 # The NestJS API runs directly on your machine (npm run start:dev), NOT in
@@ -42,22 +41,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Redis ──────────────────────────────────────────────────────────────────
-  redis:
-    image: redis:7.2-alpine
-    container_name: wokizi_redis
-    restart: unless-stopped
-    ports:
-      - '6379:6379'
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
   # ── MinIO (local S3) ───────────────────────────────────────────────────────
   # API:     http://localhost:9000   (used by the backend)
   # Console: http://localhost:9001   (browser UI — login: minioadmin / minioadmin123)
@@ -77,5 +60,4 @@ services:
 
 volumes:
   postgres_data:
-  redis_data:
   minio_data:

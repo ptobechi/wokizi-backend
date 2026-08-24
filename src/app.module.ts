@@ -6,7 +6,6 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
 import jwtConfig from './config/jwt.config';
-import redisConfig from './config/redis.config';
 import storageConfig from './config/storage.config';
 import websocketConfig from './config/websocket.config';
 import notificationConfig from './config/notification.config';
@@ -56,7 +55,7 @@ import { WithdrawalsModule } from './modules/withdrawals/withdrawals.module';
     // ─── Global Config ────────────────────────────────────────
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, jwtConfig, redisConfig, storageConfig, websocketConfig, notificationConfig, smsConfig, paystackConfig],
+      load: [appConfig, databaseConfig, jwtConfig, storageConfig, websocketConfig, notificationConfig, smsConfig, paystackConfig],
       envFilePath: ['.env.local', '.env'],
     }),
 
