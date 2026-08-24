@@ -16,14 +16,16 @@ export class SmsService {
   async sendOtp(phone: string, code: string): Promise<SmsSendResult> {
     const message = `Your Wokizi verification code is ${code}. Valid for 10 minutes. Do not share this code.`;
 
-    // Falls back to console-logging whenever there's no real Termii key
-    // configured — independent of NODE_ENV, so this works correctly during
-    // a "real" production deploy that just hasn't gone live with Termii
-    // yet, without needing to flip NODE_ENV (which would also disable
-    // Paystack's live mode and expose Swagger publicly — see sms.service.ts
-    // git history / commit message for why this isn't gated on nodeEnv).
+    // Falls back to console-logging unless Termii is both configured AND
+    // explicitly enabled — independent of NODE_ENV (flipping NODE_ENV would
+    // also disable Paystack's live mode and expose Swagger publicly, see
+    // paystack.service.ts / main.ts). TERMII_ENABLED is deliberately
+    // separate from TERMII_API_KEY so a real key can sit ready in .env
+    // (e.g. while sender ID approval is pending) without sends actually
+    // trying to use it yet.
     const apiKey = this.configService.get<string>('sms.termiiApiKey');
-    if (!apiKey) {
+    const termiiEnabled = this.configService.get<boolean>('sms.termiiEnabled');
+    if (!apiKey || !termiiEnabled) {
       return this.sendDevOtp(phone, code, message);
     }
 

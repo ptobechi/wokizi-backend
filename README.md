@@ -109,6 +109,7 @@ Copy `.env.example` to `.env` and set all values.
 | `FIREBASE_CLIENT_EMAIL` | Firebase service account email |
 | `TERMII_API_KEY` | Termii API key for SMS OTP |
 | `TERMII_SENDER_ID` | Termii sender ID |
+| `TERMII_ENABLED` | `true` to actually send via Termii; anything else (including a configured key) still falls back to console-logged OTP |
 | `THROTTLE_TTL` | Rate limit window ms (default: `60000`) |
 | `THROTTLE_LIMIT` | Max requests per window (default: `100`) |
 | `OTP_EXPIRES_MINUTES` | OTP validity in minutes (default: `10`) |
@@ -209,7 +210,7 @@ Flow:
 5. `POST /api/v1/auth/refresh` — refresh access token
 6. `POST /api/v1/auth/logout` — revoke refresh token
 
-In development with no `TERMII_API_KEY`, OTP is printed to the terminal console.
+Unless `TERMII_ENABLED=true` (and a real `TERMII_API_KEY` is set), OTP is printed to the console instead of sent via SMS — this is independent of `NODE_ENV`, so it works the same way on a production deploy that hasn't gone live with Termii yet.
 
 ---
 
