@@ -42,6 +42,11 @@ CMD ["npm", "run", "start:dev"]
 # ─── Build ──────────────────────────────────────────────────────────────────
 FROM base AS builder
 RUN npm ci --ignore-scripts
+# This stage only compiles TypeScript (never runs the app) so bcrypt's
+# native binding was never needed here — until `prisma db seed` started
+# being run directly from a `builder`-stage image (ts-node actually
+# executes seed.ts, which imports bcrypt), so it needs the same rebuild.
+RUN npm rebuild bcrypt --build-from-source
 RUN npx prisma generate
 COPY . .
 RUN npm run build
