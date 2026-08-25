@@ -54,6 +54,7 @@ function buildPrismaMock() {
     },
     userDevice: {
       upsert: jest.fn(),
+      updateMany: jest.fn(),
     },
     userProfile: {
       findUnique: jest.fn(),
@@ -326,28 +327,38 @@ describe('AuthService', () => {
   // ── logout ───────────────────────────────────────────────────────────────────
 
   describe('logout', () => {
-    it('revokes specific token when rawRefreshToken is provided', async () => {
+    it('revokes specific token when rawRefreshToken is provided, and deactivates its device', async () => {
       prisma.refreshToken.findMany.mockResolvedValue([
-        { id: 'rt-1', tokenHash: 'hash', isRevoked: false },
+        { id: 'rt-1', tokenHash: 'hash', isRevoked: false, deviceId: 'device-1' },
       ]);
       prisma.refreshToken.update.mockResolvedValue({});
+      prisma.userDevice.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await service.logout(mockUser.id, 'raw-token');
 
       expect(prisma.refreshToken.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { isRevoked: true } }),
       );
+      expect(prisma.userDevice.updateMany).toHaveBeenCalledWith({
+        where: { userId: mockUser.id, deviceId: 'device-1' },
+        data: { isActive: false },
+      });
       expect(result.message).toMatch(/logged out/i);
     });
 
-    it('revokes all tokens when no rawRefreshToken provided', async () => {
+    it('revokes all tokens and deactivates all devices when no rawRefreshToken provided', async () => {
       prisma.refreshToken.updateMany.mockResolvedValue({ count: 3 });
+      prisma.userDevice.updateMany.mockResolvedValue({ count: 2 });
 
       const result = await service.logout(mockUser.id);
 
       expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { userId: mockUser.id }, data: { isRevoked: true } }),
       );
+      expect(prisma.userDevice.updateMany).toHaveBeenCalledWith({
+        where: { userId: mockUser.id },
+        data: { isActive: false },
+      });
       expect(result.message).toMatch(/logged out/i);
     });
   });

@@ -224,7 +224,7 @@ export class QuotationsService implements OnModuleInit {
         userId:   quotation.providerId,
         type:     notifType,
         ctx:      { rejectionReason: dto.rejectionReason },
-        linkData: { quotationId },
+        linkData: { quotationId, conversationId: quotation.conversationId },
       });
     }
 

@@ -265,6 +265,10 @@ export class AuthService {
   }
 
   // ─── Logout ───────────────────────────────────────────────────────────────
+  // Also deactivates the UserDevice row for the device logging out, so its
+  // push token stops receiving notifications for this user — otherwise a
+  // stale token on a shared/reused device keeps getting this user's pushes
+  // after they've signed out (or another user signs in on the same device).
   async logout(userId: string, rawRefreshToken?: string) {
     if (rawRefreshToken) {
       const tokens = await this.prisma.refreshToken.findMany({
@@ -276,11 +280,18 @@ export class AuthService {
             where: { id: t.id },
             data: { isRevoked: true },
           });
+          if (t.deviceId) {
+            await this.prisma.userDevice.updateMany({
+              where: { userId, deviceId: t.deviceId },
+              data: { isActive: false },
+            });
+          }
           break;
         }
       }
     } else {
       await this.prisma.refreshToken.updateMany({ where: { userId }, data: { isRevoked: true } });
+      await this.prisma.userDevice.updateMany({ where: { userId }, data: { isActive: false } });
     }
     return { message: 'Logged out successfully' };
   }

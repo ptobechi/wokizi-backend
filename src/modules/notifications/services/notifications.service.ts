@@ -93,7 +93,15 @@ export class NotificationsService {
     });
     const tokens = devices.map(d => d.fcmToken).filter(Boolean) as string[];
     if (tokens.length) {
-      await this.expo.sendToTokens(tokens, { title: payload.title, body: payload.body });
+      // `type` + the caller's linkData (conversationId, bookingId, etc.) must
+      // travel with the push itself, not just the DB row — this is what the
+      // mobile tap handler routes on. Without it, a tapped push has nothing
+      // to navigate to.
+      await this.expo.sendToTokens(tokens, {
+        title: payload.title,
+        body:  payload.body,
+        data:  { ...(payload.data ?? {}), type: payload.type },
+      });
     }
   }
 }
