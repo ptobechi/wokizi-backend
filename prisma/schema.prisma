@@ -114,10 +114,13 @@ enum NotificationType {
   NEW_MESSAGE
 
   // ── Service Requests ───────────────────────────────────────────────────
-  SERVICE_REQUEST_SENT     // Confirmation to the client who sent the request
-  NEW_SERVICE_REQUEST      // Notification to the provider who received the request
-  REQUEST_ACCEPTED         // Provider accepted → notify client
-  REQUEST_REJECTED         // Provider declined → notify client
+  SERVICE_REQUEST_SENT // Confirmation to the client who sent the request
+  NEW_SERVICE_REQUEST // Notification to the provider who received the request
+  REQUEST_ACCEPTED // Provider accepted → notify client
+  REQUEST_REJECTED // Provider declined → notify client
+  REQUEST_PRICE_ADJUSTED // Provider changed the price → notify client
+  REQUEST_PRICE_ACCEPTED // Client accepted the (possibly adjusted) price → notify provider
+  REQUEST_EXPIRED // Request went unanswered past its expiry → notify client
 
   // ── Quotations ─────────────────────────────────────────────────────────
   NEW_QUOTE
@@ -239,6 +242,7 @@ enum UploadPurpose {
   DISPUTE_EVIDENCE
   REVIEW_IMAGE
   CATEGORY_ICON
+  SERVICE_REQUEST
 }
 
 // ─────────────────────────────────────────
@@ -263,41 +267,43 @@ model User {
   updatedAt           DateTime  @updatedAt
   deletedAt           DateTime?
 
-  profile               UserProfile?
-  devices               UserDevice[]
-  refreshTokens         RefreshToken[]
-  otpCodes              OtpCode[]
-  verification          Verification?
-  services              ServiceListing[]
-  portfolio             Portfolio?
-  sentMessages          Message[]                @relation("SentMessages")
-  conversations         ConversationParticipant[]
-  quotationsAsProvider  Quotation[]              @relation("ProviderQuotations")
-  quotationsAsCustomer  Quotation[]              @relation("CustomerQuotations")
-  bookingsAsCustomer    Booking[]                @relation("CustomerBookings")
-  bookingsAsProvider    Booking[]                @relation("ProviderBookings")
-  reviewsGiven          Review[]                 @relation("ReviewsGiven")
-  reviewsReceived       Review[]                 @relation("ReviewsReceived")
-  followers             Follow[]                 @relation("UserFollowers")
-  following             Follow[]                 @relation("UserFollowing")
-  savedServices         SavedService[]
-  serviceLikes          ServiceLike[]
-  notifications         Notification[]
-  notificationPrefs     NotificationPreference?
-  disputesRaised        Dispute[]                @relation("DisputeRaisedBy")
-  disputesAsProvider    Dispute[]                @relation("DisputeProvider")
-  uploads               Upload[]
-  auditLogs             AuditLog[]
-  addresses             Address[]
-  trackingAsArtisan     TrackingSession[]        @relation("ArtisanTracking")
-  trackingAsCustomer    TrackingSession[]        @relation("CustomerTracking")
-  supportTickets        SupportTicket[]
-  contentReports        ContentReport[]
-  wallet                      Wallet?
-  withdrawals                 Withdrawal[]
-  payments                    Payment[]
-  escrowReservationsAsCustomer EscrowReservation[] @relation("EscrowCustomer")
-  escrowReservationsAsProvider EscrowReservation[] @relation("EscrowProvider")
+  profile                      UserProfile?
+  devices                      UserDevice[]
+  refreshTokens                RefreshToken[]
+  otpCodes                     OtpCode[]
+  verification                 Verification?
+  services                     ServiceListing[]
+  portfolio                    Portfolio?
+  sentMessages                 Message[]                 @relation("SentMessages")
+  conversations                ConversationParticipant[]
+  quotationsAsProvider         Quotation[]               @relation("ProviderQuotations")
+  quotationsAsCustomer         Quotation[]               @relation("CustomerQuotations")
+  bookingsAsCustomer           Booking[]                 @relation("CustomerBookings")
+  bookingsAsProvider           Booking[]                 @relation("ProviderBookings")
+  serviceRequestsAsCustomer    ServiceRequest[]          @relation("CustomerServiceRequests")
+  serviceRequestsAsProvider    ServiceRequest[]          @relation("ProviderServiceRequests")
+  reviewsGiven                 Review[]                  @relation("ReviewsGiven")
+  reviewsReceived              Review[]                  @relation("ReviewsReceived")
+  followers                    Follow[]                  @relation("UserFollowers")
+  following                    Follow[]                  @relation("UserFollowing")
+  savedServices                SavedService[]
+  serviceLikes                 ServiceLike[]
+  notifications                Notification[]
+  notificationPrefs            NotificationPreference?
+  disputesRaised               Dispute[]                 @relation("DisputeRaisedBy")
+  disputesAsProvider           Dispute[]                 @relation("DisputeProvider")
+  uploads                      Upload[]
+  auditLogs                    AuditLog[]
+  addresses                    Address[]
+  trackingAsArtisan            TrackingSession[]         @relation("ArtisanTracking")
+  trackingAsCustomer           TrackingSession[]         @relation("CustomerTracking")
+  supportTickets               SupportTicket[]
+  contentReports               ContentReport[]
+  wallet                       Wallet?
+  withdrawals                  Withdrawal[]
+  payments                     Payment[]
+  escrowReservationsAsCustomer EscrowReservation[]       @relation("EscrowCustomer")
+  escrowReservationsAsProvider EscrowReservation[]       @relation("EscrowProvider")
 
   @@index([phone])
   @@index([email])
@@ -308,8 +314,8 @@ model User {
 }
 
 model UserProfile {
-  id              String    @id @default(uuid())
-  userId          String    @unique
+  id              String                                 @id @default(uuid())
+  userId          String                                 @unique
   firstName       String?
   lastName        String?
   displayName     String?
@@ -317,22 +323,22 @@ model UserProfile {
   avatarUrl       String?
   city            String?
   state           String?
-  country         String    @default("NG")
+  country         String                                 @default("NG")
   latitude        Float?
   longitude       Float?
   location        Unsupported("geography(Point, 4326)")?
-  isProvider      Boolean   @default(false)
-  avgRating       Float     @default(0)
-  totalReviews    Int       @default(0)
-  completedJobs   Int       @default(0)
-  completionRate  Float     @default(0)
-  responseRate    Float     @default(0)
-  avgResponseTime Int       @default(0)   // seconds
-  travelRadius    Int       @default(10)  // km
-  followersCount  Int       @default(0)
-  followingCount  Int       @default(0)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  isProvider      Boolean                                @default(false)
+  avgRating       Float                                  @default(0)
+  totalReviews    Int                                    @default(0)
+  completedJobs   Int                                    @default(0)
+  completionRate  Float                                  @default(0)
+  responseRate    Float                                  @default(0)
+  avgResponseTime Int                                    @default(0) // seconds
+  travelRadius    Int                                    @default(10) // km
+  followersCount  Int                                    @default(0)
+  followingCount  Int                                    @default(0)
+  createdAt       DateTime                               @default(now())
+  updatedAt       DateTime                               @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -342,17 +348,17 @@ model UserProfile {
 }
 
 model UserDevice {
-  id          String   @id @default(uuid())
-  userId      String
-  deviceId    String
-  deviceType  String   // ios | android | web
-  deviceName  String?
-  fcmToken    String?
-  ipAddress   String?
-  userAgent   String?
-  isActive    Boolean  @default(true)
-  lastSeenAt  DateTime @default(now())
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  userId     String
+  deviceId   String
+  deviceType String // ios | android | web
+  deviceName String?
+  fcmToken   String?
+  ipAddress  String?
+  userAgent  String?
+  isActive   Boolean  @default(true)
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -362,14 +368,14 @@ model UserDevice {
 }
 
 model RefreshToken {
-  id         String   @id @default(uuid())
-  userId     String
-  tokenHash  String   @unique
-  deviceId   String?
-  ipAddress  String?
-  expiresAt  DateTime
-  isRevoked  Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  deviceId  String?
+  ipAddress String?
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -464,57 +470,58 @@ model Category {
 // ─────────────────────────────────────────
 
 model ServiceListing {
-  id              String        @id @default(uuid())
-  providerId      String
-  categoryId      String
-  subcategoryId   String?
-  title           String
-  slug            String        @unique
-  description     String
-  shortDescription String?
-  startingPrice   Float
-  minPrice        Float?
-  maxPrice        Float?
-  serviceRadius   Int           @default(10)
-  serviceType     ServiceType   @default(BOTH)
-  responseTime    ResponseTime  @default(WITHIN_1_HOUR)
-  pricingModel    PricingModel  @default(FIXED_PRICE)
+  id                   String                   @id @default(uuid())
+  providerId           String
+  categoryId           String
+  subcategoryId        String?
+  title                String
+  slug                 String                   @unique
+  description          String
+  shortDescription     String?
+  startingPrice        Float
+  minPrice             Float?
+  maxPrice             Float?
+  serviceRadius        Int                      @default(10)
+  serviceType          ServiceType              @default(BOTH)
+  responseTime         ResponseTime             @default(WITHIN_1_HOUR)
+  pricingModel         PricingModel             @default(FIXED_PRICE)
   materialHandlingFee  Float?
   minimumServiceCharge Float?
-  extraCharges    Json?
-  whatsIncluded   String?
-  whatsNotIncluded String?
-  toolsEquipment  String?
+  extraCharges         Json?
+  whatsIncluded        String?
+  whatsNotIncluded     String?
+  toolsEquipment       String?
   customerRequirements String?
-  isEmergency     Boolean       @default(false)
-  status          ServiceStatus @default(DRAFT)
-  isPublished     Boolean       @default(false)
-  publishedAt     DateTime?
-  reviewNotes     String?
-  rejectionReason String?
-  reviewedBy      String?
-  reviewedAt      DateTime?
-  trendingScore   Float         @default(0)
-  engagementScore Float         @default(0)
-  likesCount      Int           @default(0)
-  savesCount      Int           @default(0)
-  sharesCount     Int           @default(0)
-  viewsCount      Int           @default(0)
-  searchVector    Unsupported("tsvector")?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  deletedAt       DateTime?
+  isEmergency          Boolean                  @default(false)
+  status               ServiceStatus            @default(DRAFT)
+  isPublished          Boolean                  @default(false)
+  publishedAt          DateTime?
+  reviewNotes          String?
+  rejectionReason      String?
+  reviewedBy           String?
+  reviewedAt           DateTime?
+  trendingScore        Float                    @default(0)
+  engagementScore      Float                    @default(0)
+  likesCount           Int                      @default(0)
+  savesCount           Int                      @default(0)
+  sharesCount          Int                      @default(0)
+  viewsCount           Int                      @default(0)
+  searchVector         Unsupported("tsvector")?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  deletedAt            DateTime?
 
-  provider      User            @relation(fields: [providerId], references: [id])
-  category      Category        @relation(fields: [categoryId], references: [id])
-  images        ServiceImage[]
-  portfolioItems PortfolioItem[]
-  availability  Availability?
-  bookings      Booking[]
-  reviews       Review[]
-  savedBy       SavedService[]
-  likes         ServiceLike[]
-  quotations    Quotation[]
+  provider        User             @relation(fields: [providerId], references: [id])
+  category        Category         @relation(fields: [categoryId], references: [id])
+  images          ServiceImage[]
+  portfolioItems  PortfolioItem[]
+  availability    Availability?
+  bookings        Booking[]
+  reviews         Review[]
+  savedBy         SavedService[]
+  likes           ServiceLike[]
+  quotations      Quotation[]
+  serviceRequests ServiceRequest[]
 
   @@index([providerId])
   @@index([categoryId])
@@ -586,18 +593,18 @@ model PortfolioItem {
 // ─────────────────────────────────────────
 
 model Availability {
-  id             String    @id @default(uuid())
-  serviceId      String    @unique
-  isVacationMode Boolean   @default(false)
-  vacationStart  DateTime?
-  vacationEnd    DateTime?
-  breakStartTime String?
-  breakEndTime   String?
-  advanceBookingHours Int  @default(24)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                  String    @id @default(uuid())
+  serviceId           String    @unique
+  isVacationMode      Boolean   @default(false)
+  vacationStart       DateTime?
+  vacationEnd         DateTime?
+  breakStartTime      String?
+  breakEndTime        String?
+  advanceBookingHours Int       @default(24)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
-  service  ServiceListing    @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  service  ServiceListing     @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   slots    AvailabilitySlot[]
   holidays ProviderHoliday[]
 
@@ -605,12 +612,12 @@ model Availability {
 }
 
 model AvailabilitySlot {
-  id             String   @id @default(uuid())
+  id             String  @id @default(uuid())
   availabilityId String
-  dayOfWeek      Int      // 0=Sun … 6=Sat
-  startTime      String   // HH:MM
-  endTime        String   // HH:MM
-  isAvailable    Boolean  @default(true)
+  dayOfWeek      Int // 0=Sun … 6=Sat
+  startTime      String // HH:MM
+  endTime        String // HH:MM
+  isAvailable    Boolean @default(true)
 
   availability Availability @relation(fields: [availabilityId], references: [id], onDelete: Cascade)
 
@@ -644,13 +651,14 @@ model Conversation {
   lastMessage   String?
   isArchived    Boolean   @default(false)
   archivedAt    DateTime?
-  closedReason  String?   // COMPLETED | CANCELLED | REJECTED — set on close
+  closedReason  String? // COMPLETED | CANCELLED | REJECTED — set on close
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  participants ConversationParticipant[]
-  messages     Message[]
-  quotations   Quotation[]
+  participants    ConversationParticipant[]
+  messages        Message[]
+  quotations      Quotation[]
+  serviceRequests ServiceRequest[]
 
   @@index([lastMessageAt])
   @@index([isArchived])
@@ -688,8 +696,8 @@ model Message {
   deletedAt      DateTime?
   createdAt      DateTime    @default(now())
 
-  conversation Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender       User          @relation("SentMessages", fields: [senderId], references: [id])
+  conversation Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User           @relation("SentMessages", fields: [senderId], references: [id])
   media        MessageMedia[]
 
   @@index([conversationId, createdAt])
@@ -712,6 +720,73 @@ model MessageMedia {
 
   @@index([messageId])
   @@map("message_media")
+}
+
+// ─────────────────────────────────────────
+// SERVICE REQUESTS
+// ─────────────────────────────────────────
+// The structured front door of the request flow: created alongside the
+// Conversation when a customer requests a service (description, photos, job
+// location, base price). Accepting one auto-generates the Quotation that the
+// existing negotiation/booking chain already knows how to carry forward —
+// this is additive, not a parallel booking system.
+
+enum ServiceRequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CONVERTED // a Booking now exists for this request
+  CANCELLED // customer withdrew before the provider responded
+}
+
+model ServiceRequest {
+  id             String               @id @default(uuid())
+  conversationId String
+  customerId     String
+  providerId     String
+  serviceId      String
+  description    String
+  address        String
+  latitude       Float
+  longitude      Float
+  savedAddressId String?
+  basePrice      Float
+  adjustedPrice  Float?
+  priceReason    String?
+  declineReason  String?
+  status         ServiceRequestStatus @default(PENDING)
+  expiresAt      DateTime
+  respondedAt    DateTime?
+  quotationId    String?              @unique
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  conversation Conversation          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  customer     User                  @relation("CustomerServiceRequests", fields: [customerId], references: [id])
+  provider     User                  @relation("ProviderServiceRequests", fields: [providerId], references: [id])
+  service      ServiceListing        @relation(fields: [serviceId], references: [id])
+  quotation    Quotation?            @relation(fields: [quotationId], references: [id])
+  images       ServiceRequestImage[]
+
+  @@index([providerId, status])
+  @@index([customerId])
+  @@index([expiresAt])
+  @@index([conversationId])
+  @@map("service_requests")
+}
+
+model ServiceRequestImage {
+  id               String   @id @default(uuid())
+  serviceRequestId String
+  url              String
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+
+  @@index([serviceRequestId])
+  @@map("service_request_images")
 }
 
 // ─────────────────────────────────────────
@@ -743,14 +818,15 @@ model Quotation {
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
-  conversation Conversation    @relation(fields: [conversationId], references: [id])
-  service      ServiceListing? @relation(fields: [serviceId], references: [id])
-  provider     User            @relation("ProviderQuotations", fields: [providerId], references: [id])
-  customer     User            @relation("CustomerQuotations", fields: [customerId], references: [id])
-  parent       Quotation?      @relation("QuotationRevisions", fields: [parentId], references: [id])
-  revisions    Quotation[]     @relation("QuotationRevisions")
-  booking      Booking?
-  items        QuotationItem[]
+  conversation   Conversation    @relation(fields: [conversationId], references: [id])
+  service        ServiceListing? @relation(fields: [serviceId], references: [id])
+  provider       User            @relation("ProviderQuotations", fields: [providerId], references: [id])
+  customer       User            @relation("CustomerQuotations", fields: [customerId], references: [id])
+  parent         Quotation?      @relation("QuotationRevisions", fields: [parentId], references: [id])
+  revisions      Quotation[]     @relation("QuotationRevisions")
+  booking        Booking?
+  items          QuotationItem[]
+  serviceRequest ServiceRequest?
 
   @@index([conversationId])
   @@index([providerId])
@@ -760,16 +836,16 @@ model Quotation {
 }
 
 model QuotationItem {
-  id           String            @id @default(uuid())
-  quotationId  String
-  type         QuotationItemType
-  name         String
-  description  String?
-  quantity     Float             @default(1)
-  unitPrice    Float
-  totalPrice   Float
-  sortOrder    Int               @default(0)
-  createdAt    DateTime          @default(now())
+  id          String            @id @default(uuid())
+  quotationId String
+  type        QuotationItemType
+  name        String
+  description String?
+  quantity    Float             @default(1)
+  unitPrice   Float
+  totalPrice  Float
+  sortOrder   Int               @default(0)
+  createdAt   DateTime          @default(now())
 
   quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
 
@@ -798,10 +874,10 @@ model Booking {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  customer          User              @relation("CustomerBookings", fields: [customerId], references: [id])
-  provider          User              @relation("ProviderBookings", fields: [providerId], references: [id])
-  service           ServiceListing    @relation(fields: [serviceId], references: [id])
-  quotation         Quotation         @relation(fields: [quotationId], references: [id])
+  customer          User               @relation("CustomerBookings", fields: [customerId], references: [id])
+  provider          User               @relation("ProviderBookings", fields: [providerId], references: [id])
+  service           ServiceListing     @relation(fields: [serviceId], references: [id])
+  quotation         Quotation          @relation(fields: [quotationId], references: [id])
   review            Review?
   dispute           Dispute?
   trackingSession   TrackingSession?
@@ -966,10 +1042,10 @@ model Dispute {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  booking    Booking           @relation(fields: [bookingId], references: [id])
-  raisedBy   User              @relation("DisputeRaisedBy", fields: [raisedById], references: [id])
-  provider   User              @relation("DisputeProvider", fields: [providerId], references: [id])
-  evidence   DisputeEvidence[]
+  booking  Booking           @relation(fields: [bookingId], references: [id])
+  raisedBy User              @relation("DisputeRaisedBy", fields: [raisedById], references: [id])
+  provider User              @relation("DisputeProvider", fields: [providerId], references: [id])
+  evidence DisputeEvidence[]
 
   @@index([bookingId])
   @@index([raisedById])
@@ -1030,8 +1106,8 @@ model Address {
   id        String       @id @default(uuid())
   userId    String
   label     AddressLabel @default(OTHER)
-  name      String?      // custom name e.g. "Mum's house"
-  address   String       // formatted address string
+  name      String? // custom name e.g. "Mum's house"
+  address   String // formatted address string
   latitude  Float
   longitude Float
   isDefault Boolean      @default(false)
@@ -1074,7 +1150,7 @@ model TrackingSession {
   updatedAt            DateTime       @updatedAt
 
   booking  Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  artisan  User    @relation("ArtisanTracking",  fields: [artisanId],  references: [id])
+  artisan  User    @relation("ArtisanTracking", fields: [artisanId], references: [id])
   customer User    @relation("CustomerTracking", fields: [customerId], references: [id])
 
   @@index([bookingId])
@@ -1213,16 +1289,16 @@ model Wallet {
 }
 
 model WalletTransaction {
-  id          String          @id @default(uuid())
-  walletId    String
-  type        TransactionType
-  amount      Decimal         @db.Decimal(18, 2)
-  balanceBefore Decimal       @db.Decimal(18, 2)
-  balanceAfter  Decimal       @db.Decimal(18, 2)
-  reference   String          @unique
-  description String?
-  metadata    Json?
-  createdAt   DateTime        @default(now())
+  id            String          @id @default(uuid())
+  walletId      String
+  type          TransactionType
+  amount        Decimal         @db.Decimal(18, 2)
+  balanceBefore Decimal         @db.Decimal(18, 2)
+  balanceAfter  Decimal         @db.Decimal(18, 2)
+  reference     String          @unique
+  description   String?
+  metadata      Json?
+  createdAt     DateTime        @default(now())
 
   wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
@@ -1233,25 +1309,25 @@ model WalletTransaction {
 }
 
 model Payment {
-  id               String        @id @default(uuid())
-  userId           String
-  bookingId        String?
-  quotationId      String?
-  paymentType      PaymentType
-  status           PaymentStatus @default(PENDING)
-  amount           Decimal       @db.Decimal(18, 2)
-  currency         String        @default("NGN")
-  providerName     String        @default("paystack")
-  paystackReference String?      @unique
-  paystackChannel  String?       // card | bank | ussd | bank_transfer | dedicated_nuban
-  reference        String        @unique
-  failureReason    String?
-  metadata         Json?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  id                String        @id @default(uuid())
+  userId            String
+  bookingId         String?
+  quotationId       String?
+  paymentType       PaymentType
+  status            PaymentStatus @default(PENDING)
+  amount            Decimal       @db.Decimal(18, 2)
+  currency          String        @default("NGN")
+  providerName      String        @default("paystack")
+  paystackReference String?       @unique
+  paystackChannel   String? // card | bank | ussd | bank_transfer | dedicated_nuban
+  reference         String        @unique
+  failureReason     String?
+  metadata          Json?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
-  user    User     @relation(fields: [userId], references: [id])
-  booking Booking? @relation(fields: [bookingId], references: [id])
+  user    User           @relation(fields: [userId], references: [id])
+  booking Booking?       @relation(fields: [bookingId], references: [id])
   audits  PaymentAudit[]
 
   @@index([userId])
@@ -1263,16 +1339,16 @@ model Payment {
 }
 
 model EscrowReservation {
-  id          String        @id @default(uuid())
-  bookingId   String        @unique
-  customerId  String
-  providerId  String
-  amount      Decimal       @db.Decimal(18, 2)
-  status      PaymentStatus @default(PENDING)
-  releasedAt  DateTime?
-  refundedAt  DateTime?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id         String        @id @default(uuid())
+  bookingId  String        @unique
+  customerId String
+  providerId String
+  amount     Decimal       @db.Decimal(18, 2)
+  status     PaymentStatus @default(PENDING)
+  releasedAt DateTime?
+  refundedAt DateTime?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
 
   booking  Booking @relation(fields: [bookingId], references: [id])
   customer User    @relation("EscrowCustomer", fields: [customerId], references: [id])
@@ -1286,22 +1362,22 @@ model EscrowReservation {
 }
 
 model Withdrawal {
-  id              String           @id @default(uuid())
-  userId          String
-  amount          Decimal          @db.Decimal(18, 2)
-  currency        String           @default("NGN")
-  status          WithdrawalStatus @default(PENDING)
-  bankName        String
-  bankCode        String           @default("")
-  accountNumber   String
-  accountName     String
-  reference       String           @unique
-  recipientCode   String?          // Paystack recipient code
-  transferCode    String?          // Paystack transfer code
-  adminNote       String?
-  processedAt     DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id            String           @id @default(uuid())
+  userId        String
+  amount        Decimal          @db.Decimal(18, 2)
+  currency      String           @default("NGN")
+  status        WithdrawalStatus @default(PENDING)
+  bankName      String
+  bankCode      String           @default("")
+  accountNumber String
+  accountName   String
+  reference     String           @unique
+  recipientCode String? // Paystack recipient code
+  transferCode  String? // Paystack transfer code
+  adminNote     String?
+  processedAt   DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
   user User @relation(fields: [userId], references: [id])
 

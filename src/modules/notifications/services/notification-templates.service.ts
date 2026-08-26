@@ -75,6 +75,21 @@ const TEMPLATES: Partial<Record<NotificationType, TemplateFactory>> = {
     body: `${artisanName ?? 'The artisan'} was unable to accept your request at this time. Explore other available artisans nearby.`,
   }),
 
+  REQUEST_PRICE_ADJUSTED: ({ artisanName, amount }) => ({
+    title: 'Price Updated',
+    body: `${artisanName ?? 'The artisan'} accepted your request with an adjusted price${amount ? ` of ₦${amount}` : ''}. Review and confirm to continue.`,
+  }),
+
+  REQUEST_PRICE_ACCEPTED: ({ userName }) => ({
+    title: 'Price Accepted',
+    body: `${userName ?? 'The client'} accepted your price. You can now proceed to scheduling.`,
+  }),
+
+  REQUEST_EXPIRED: () => ({
+    title: 'Request Expired',
+    body: 'Your service request went unanswered and has expired. Try requesting another nearby artisan.',
+  }),
+
   // ── Quotations ──────────────────────────────────────────────────────────────
 
   NEW_QUOTE: ({ artisanName }) => ({

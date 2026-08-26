@@ -77,6 +77,9 @@ describe('BookingsService', () => {
       message: {
         create: jest.fn(),
       },
+      serviceRequest: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
     };
 
     eventEmitter = { emit: jest.fn() };
@@ -149,38 +152,32 @@ describe('BookingsService', () => {
         .rejects.toThrow(BadRequestException);
     });
 
-    it('throws BadRequestException when MATERIALS_REQUIRED and no escrow', async () => {
+    it('creates a PENDING booking (not CONFIRMED) when MATERIALS_REQUIRED, awaiting escrow payment', async () => {
       prisma.quotation.findUnique.mockResolvedValue({
         ...mockQuotation, paymentType: PaymentType.MATERIALS_REQUIRED,
       });
       repo.findByQuotationId.mockResolvedValue(null);
-      prisma.escrowReservation.findFirst.mockResolvedValue(null);
+      repo.create.mockResolvedValue({ ...mockBooking, status: BookingStatus.PENDING });
 
-      await expect(service.create(CUSTOMER_ID, { quotationId: QUOTE_ID }))
-        .rejects.toThrow(BadRequestException);
+      const result = await service.create(CUSTOMER_ID, { quotationId: QUOTE_ID });
+      expect(result.status).toBe(BookingStatus.PENDING);
+      expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ status: BookingStatus.PENDING }));
+      // Not confirmed yet, so no premature BOOKING_CONFIRMED notification —
+      // that fires once the client pays escrow and calls the status update.
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith('notification.send', expect.objectContaining({
+        type: 'BOOKING_CONFIRMED',
+      }));
     });
 
-    it('throws BadRequestException when FULL_PROJECT and no escrow', async () => {
+    it('creates a PENDING booking when FULL_PROJECT, awaiting escrow payment', async () => {
       prisma.quotation.findUnique.mockResolvedValue({
         ...mockQuotation, paymentType: PaymentType.FULL_PROJECT,
       });
       repo.findByQuotationId.mockResolvedValue(null);
-      prisma.escrowReservation.findFirst.mockResolvedValue(null);
-
-      await expect(service.create(CUSTOMER_ID, { quotationId: QUOTE_ID }))
-        .rejects.toThrow(BadRequestException);
-    });
-
-    it('allows MATERIALS_REQUIRED booking when escrow exists', async () => {
-      prisma.quotation.findUnique.mockResolvedValue({
-        ...mockQuotation, paymentType: PaymentType.MATERIALS_REQUIRED,
-      });
-      repo.findByQuotationId.mockResolvedValue(null);
-      prisma.escrowReservation.findFirst.mockResolvedValue({ id: 'escrow-1', status: 'COMPLETED' });
-      repo.create.mockResolvedValue(mockBooking);
+      repo.create.mockResolvedValue({ ...mockBooking, status: BookingStatus.PENDING });
 
       const result = await service.create(CUSTOMER_ID, { quotationId: QUOTE_ID });
-      expect(result).toEqual(mockBooking);
+      expect(result.status).toBe(BookingStatus.PENDING);
     });
 
     it('blocks booking when provider is on vacation', async () => {

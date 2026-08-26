@@ -31,6 +31,7 @@ import { FeedModule } from './modules/feed/feed.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { MessagesModule } from './modules/messages/messages.module';
+import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
 import { QuotationsModule } from './modules/quotations/quotations.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
@@ -80,6 +81,7 @@ import { WithdrawalsModule } from './modules/withdrawals/withdrawals.module';
     LocationsModule,
     ConversationsModule,
     MessagesModule,
+    ServiceRequestsModule,
     QuotationsModule,
     BookingsModule,
     ReviewsModule,

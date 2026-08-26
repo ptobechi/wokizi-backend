@@ -43,22 +43,6 @@ export class BookingsService {
     const exists = await this.repo.findByQuotationId(dto.quotationId);
     if (exists) throw new BadRequestException('Booking already exists for this quotation');
 
-    // Payment gate: MATERIALS_REQUIRED and FULL_PROJECT require prior escrow
-    const paymentType = (quotation as any).paymentType as PaymentType;
-    if (paymentType === PaymentType.MATERIALS_REQUIRED || paymentType === PaymentType.FULL_PROJECT) {
-      const escrow = await this.prisma.escrowReservation.findFirst({
-        where: { customerId, status: 'COMPLETED' as any },
-        orderBy: { createdAt: 'desc' },
-      });
-      if (!escrow) {
-        throw new BadRequestException(
-          paymentType === PaymentType.MATERIALS_REQUIRED
-            ? 'Material costs must be paid before scheduling this booking'
-            : 'Full project payment is required before scheduling this booking',
-        );
-      }
-    }
-
     // Validate requested date against provider availability slots
     if (dto.scheduledAt) {
       const avail = await this.checkAvailability(quotation.serviceId, dto.scheduledAt);
@@ -67,23 +51,42 @@ export class BookingsService {
       }
     }
 
-    // Booking is created as CONFIRMED (payment confirmed by the client)
+    // LABOUR_ONLY needs no escrow, so the booking is confirmed immediately.
+    // MATERIALS_REQUIRED/FULL_PROJECT need payment first — the booking is
+    // created PENDING, then the client pays via the existing
+    // POST /payments/escrow (scoped to this booking's id, unlike the old
+    // unscoped "does the customer have any completed escrow" check this
+    // replaces) and finally confirms via the existing
+    // PATCH /bookings/:id/status, an already-allowed PENDING → CONFIRMED
+    // transition.
+    const paymentType = (quotation as any).paymentType as PaymentType;
+    const needsEscrow = paymentType === PaymentType.MATERIALS_REQUIRED || paymentType === PaymentType.FULL_PROJECT;
+
     const booking = await this.repo.create({
       customerId,
       providerId:    quotation.providerId,
       serviceId:     quotation.serviceId,
       quotationId:   dto.quotationId,
-      status:        BookingStatus.CONFIRMED,
+      status:        needsEscrow ? BookingStatus.PENDING : BookingStatus.CONFIRMED,
       scheduledAt:   dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
       providerNotes: dto.notes,
     });
 
-    this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId:   quotation.providerId,
-      type:     'BOOKING_CONFIRMED',
-      ctx:      { serviceName: (quotation as any).service?.title },
-      linkData: { bookingId: booking.id },
+    // If this quotation originated from a ServiceRequest, mark it CONVERTED
+    // now that a real Booking exists for it.
+    await this.prisma.serviceRequest.updateMany({
+      where: { quotationId: dto.quotationId, status: 'ACCEPTED' as any },
+      data:  { status: 'CONVERTED' as any },
     });
+
+    if (!needsEscrow) {
+      this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+        userId:   quotation.providerId,
+        type:     'BOOKING_CONFIRMED',
+        ctx:      { serviceName: (quotation as any).service?.title },
+        linkData: { bookingId: booking.id },
+      });
+    }
 
     return booking;
   }

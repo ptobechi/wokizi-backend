@@ -23,15 +23,28 @@ export class TrackingService {
       include: {
         customer: true,
         provider: { include: { profile: { select: { displayName: true } } } },
+        quotation: { include: { serviceRequest: true } },
       },
     });
     if (!booking) throw new NotFoundException('Booking not found');
     if (booking.providerId !== artisanId) throw new ForbiddenException();
 
+    // The job-site coordinates the customer supplied when they sent the
+    // original request — carried through Booking → Quotation → ServiceRequest
+    // since Booking itself has no location fields of its own.
+    const destination = (booking as any).quotation?.serviceRequest;
+
     const session = await this.prisma.trackingSession.upsert({
       where:  { bookingId },
       update: { status: 'ACTIVE', completedAt: null },
-      create: { bookingId, artisanId, customerId: booking.customerId, status: 'ACTIVE' },
+      create: {
+        bookingId,
+        artisanId,
+        customerId: booking.customerId,
+        status: 'ACTIVE',
+        destinationLatitude:  destination?.latitude,
+        destinationLongitude: destination?.longitude,
+      },
     });
 
     this.eventEmitter.emit(TrackingEvent.TRACKING_STARTED, {
