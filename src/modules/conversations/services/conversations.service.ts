@@ -22,7 +22,7 @@ export class ConversationsService {
     private eventEmitter: EventEmitter2,
   ) {}
 
-  async create(userId: string, dto: CreateConversationDto) {
+  async create(userId: string, dto: CreateConversationDto, options?: { skipNotifications?: boolean }) {
     if (dto.recipientId === userId) throw new BadRequestException('Cannot start conversation with yourself');
 
     const recipient = await this.prisma.user.findUnique({ where: { id: dto.recipientId } });
@@ -33,38 +33,44 @@ export class ConversationsService {
 
     const conversation = await this.repo.create({ userA: userId, userB: dto.recipientId, serviceId: dto.serviceId });
 
-    // Notify the recipient of the new service request
-    const senderProfile = await this.prisma.userProfile.findUnique({
-      where: { userId }, select: { displayName: true },
-    });
-    const senderName = senderProfile?.displayName ?? 'Someone';
-
-    let serviceTitle = 'your service';
-    if (dto.serviceId) {
-      const svc = await this.prisma.serviceListing.findUnique({
-        where: { id: dto.serviceId }, select: { title: true },
+    // ServiceRequestsService creates a ServiceRequest row right after calling
+    // this and fires its own NEW_SERVICE_REQUEST/SERVICE_REQUEST_SENT with the
+    // real requestId attached — that row doesn't exist yet at this point, so
+    // it opts out here rather than us firing a notification with no requestId.
+    if (!options?.skipNotifications) {
+      // Notify the recipient of the new service request
+      const senderProfile = await this.prisma.userProfile.findUnique({
+        where: { userId }, select: { displayName: true },
       });
-      if (svc) serviceTitle = svc.title;
+      const senderName = senderProfile?.displayName ?? 'Someone';
+
+      let serviceTitle = 'your service';
+      if (dto.serviceId) {
+        const svc = await this.prisma.serviceListing.findUnique({
+          where: { id: dto.serviceId }, select: { title: true },
+        });
+        if (svc) serviceTitle = svc.title;
+      }
+
+      // Notify the provider
+      this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+        userId:   dto.recipientId,
+        type:     'NEW_SERVICE_REQUEST',
+        ctx:      { userName: senderName, serviceName: serviceTitle },
+        linkData: { conversationId: conversation.id, senderId: userId },
+      });
+
+      // Confirm to the client their request was sent
+      const recipientProfile = await this.prisma.userProfile.findUnique({
+        where: { userId: dto.recipientId }, select: { displayName: true },
+      });
+      this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+        userId:   userId,
+        type:     'SERVICE_REQUEST_SENT',
+        ctx:      { artisanName: recipientProfile?.displayName ?? 'the artisan' },
+        linkData: { conversationId: conversation.id },
+      });
     }
-
-    // Notify the provider
-    this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId:   dto.recipientId,
-      type:     'NEW_SERVICE_REQUEST',
-      ctx:      { userName: senderName, serviceName: serviceTitle },
-      linkData: { conversationId: conversation.id, senderId: userId },
-    });
-
-    // Confirm to the client their request was sent
-    const recipientProfile = await this.prisma.userProfile.findUnique({
-      where: { userId: dto.recipientId }, select: { displayName: true },
-    });
-    this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId:   userId,
-      type:     'SERVICE_REQUEST_SENT',
-      ctx:      { artisanName: recipientProfile?.displayName ?? 'the artisan' },
-      linkData: { conversationId: conversation.id },
-    });
 
     return conversation;
   }

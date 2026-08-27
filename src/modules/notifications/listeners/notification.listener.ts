@@ -43,7 +43,17 @@ export class NotificationListener {
 
     try {
       const { count } = await this.notificationsService.getUnreadCount(event.userId);
-      this.eventEmitter.emit(EventName.NOTIFICATION_NEW, { userId: event.userId, count });
+      // type/title/body/data ride along so a foregrounded client can act on
+      // this specific event (e.g. show an incoming-request alert) instead of
+      // only learning the badge count changed and having to guess why.
+      this.eventEmitter.emit(EventName.NOTIFICATION_NEW, {
+        userId: event.userId,
+        count,
+        type:   event.type,
+        title,
+        body,
+        data:   event.linkData ?? {},
+      });
     } catch (error) {
       this.logger.error(
         `Failed to broadcast unread count for user ${event.userId}`,

@@ -113,8 +113,16 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   @OnEvent(EventName.NOTIFICATION_NEW)
-  handleNotificationNew(payload: { userId: string; count: number }) {
-    this.sendToUser(payload.userId, 'notification:new', { count: payload.count });
+  handleNotificationNew(payload: {
+    userId: string; count: number; type?: string; title?: string; body?: string; data?: Record<string, string>;
+  }) {
+    this.sendToUser(payload.userId, 'notification:new', {
+      count: payload.count,
+      type:  payload.type,
+      title: payload.title,
+      body:  payload.body,
+      data:  payload.data,
+    });
   }
 
   // ── Tracking events — emitted to the customer watching their artisan ────────

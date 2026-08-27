@@ -65,12 +65,15 @@ export class ServiceRequestsService implements OnModuleInit {
     if (service.providerId === customerId) throw new BadRequestException('Cannot request your own service');
 
     // Reuses the existing conversation-creation flow (find-or-create between
-    // these two users for this service, already fires SERVICE_REQUEST_SENT /
-    // NEW_SERVICE_REQUEST notifications) rather than duplicating it.
-    const conversation = await this.conversationsService.create(customerId, {
-      recipientId: service.providerId,
-      serviceId:   service.id,
-    });
+    // these two users for this service) rather than duplicating it — but this
+    // service owns the NEW_SERVICE_REQUEST/SERVICE_REQUEST_SENT notifications
+    // itself (below), since only it knows the real requestId, and because a
+    // reused (already-existing) conversation would otherwise skip them.
+    const conversation = await this.conversationsService.create(
+      customerId,
+      { recipientId: service.providerId, serviceId: service.id },
+      { skipNotifications: true },
+    );
 
     // A conversation can outlive several requests over time (e.g. a prior
     // request was declined/expired and the customer tries again), so this
@@ -93,6 +96,26 @@ export class ServiceRequestsService implements OnModuleInit {
       images: dto.images?.length
         ? { create: dto.images.map((url, i) => ({ url, sortOrder: i })) }
         : undefined,
+    });
+
+    const customerProfile = await this.prisma.userProfile.findUnique({
+      where: { userId: customerId }, select: { displayName: true },
+    });
+    this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+      userId:   service.providerId,
+      type:     'NEW_SERVICE_REQUEST',
+      ctx:      { userName: customerProfile?.displayName, serviceName: service.title },
+      linkData: { conversationId: conversation.id, requestId: request.id },
+    });
+
+    const providerProfile = await this.prisma.userProfile.findUnique({
+      where: { userId: service.providerId }, select: { displayName: true },
+    });
+    this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+      userId:   customerId,
+      type:     'SERVICE_REQUEST_SENT',
+      ctx:      { artisanName: providerProfile?.displayName ?? 'the artisan' },
+      linkData: { conversationId: conversation.id, requestId: request.id },
     });
 
     return request;
@@ -158,6 +181,10 @@ export class ServiceRequestsService implements OnModuleInit {
       // Auto-generates the Quotation the existing negotiation/booking chain
       // already knows how to carry forward — the customer still explicitly
       // accepts it via the existing, untouched POST /quotations/:id/respond.
+      // If the price was adjusted, the reason rides in `notes` — the exact
+      // same field the existing QuoteCard UI already renders, so the
+      // customer sees why without any new screen.
+      const priceChanged = finalPrice != null && finalPrice !== existing.basePrice;
       const quotation = await tx.quotation.create({
         data: {
           conversationId: existing.conversationId,
@@ -168,6 +195,7 @@ export class ServiceRequestsService implements OnModuleInit {
           labourCost:     price,
           totalAmount:    price,
           status:         'PENDING',
+          notes:          priceChanged ? dto?.reason : undefined,
         },
       });
 
