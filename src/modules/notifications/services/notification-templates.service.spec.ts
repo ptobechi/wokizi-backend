@@ -71,6 +71,21 @@ describe('NotificationTemplatesService', () => {
     });
   });
 
+  describe('REQUEST_PRICE_ACCEPTED', () => {
+    it('includes the client name', () => {
+      const r = service.resolve(NotificationType.REQUEST_PRICE_ACCEPTED, { userName: 'Adaeze' });
+      expect(r.body).toContain('Adaeze');
+    });
+  });
+
+  describe('REQUEST_PRICE_DECLINED', () => {
+    it('includes the client name and reason', () => {
+      const r = service.resolve(NotificationType.REQUEST_PRICE_DECLINED, { userName: 'Adaeze', rejectionReason: 'Too expensive' });
+      expect(r.body).toContain('Adaeze');
+      expect(r.body).toContain('Too expensive');
+    });
+  });
+
   // ── Quotations ────────────────────────────────────────────────────────────
 
   describe('NEW_QUOTE', () => {

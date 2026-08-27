@@ -20,7 +20,11 @@ import { PaymentsService } from '../../payments/services/payments.service';
 class SuspendUserDto      { @IsString() reason: string; }
 class ReviewServiceDto    { @IsString() action: 'APPROVED' | 'REJECTED' | 'SUSPENDED'; @IsOptional() @IsString() reason?: string; }
 class ReviewVerifyDto     { @IsString() @IsIn(['APPROVED', 'REJECTED']) action: 'APPROVED' | 'REJECTED'; @IsOptional() @IsString() reason?: string; }
-class ResolveDisputeDto   { @IsString() resolution: string; @IsOptional() @IsString() notes?: string; }
+class ResolveDisputeDto   {
+  @IsString() @IsIn(['RESOLVED_FOR_CUSTOMER', 'RESOLVED_FOR_PROVIDER']) outcome: 'RESOLVED_FOR_CUSTOMER' | 'RESOLVED_FOR_PROVIDER';
+  @IsString() resolution: string;
+  @IsOptional() @IsString() notes?: string;
+}
 class UpdateTicketDto     { @IsOptional() @IsString() status?: string; @IsOptional() @IsString() adminNote?: string; }
 class BroadcastNotifDto   { @IsString() title: string; @IsString() body: string; @IsString() target: 'ALL' | 'PROVIDERS' | 'CUSTOMERS'; @IsOptional() userIds?: string[]; }
 class CreateCategoryDto   { @IsString() name: string; @IsString() slug: string; @IsOptional() @IsString() description?: string; @IsOptional() @IsString() iconUrl?: string; }
@@ -163,7 +167,7 @@ export class AdminController {
     @CurrentUser('id') adminId: string,
     @Body() dto: ResolveDisputeDto,
   ) {
-    return this.adminService.resolveDispute(id, adminId, dto.resolution, dto.notes);
+    return this.adminService.resolveDispute(id, adminId, dto.outcome, dto.resolution, dto.notes);
   }
 
   // ── Reviews ───────────────────────────────────────────────────────────────

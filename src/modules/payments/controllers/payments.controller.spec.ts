@@ -58,9 +58,9 @@ describe('PaymentsController', () => {
       const response = { id: 'esc1', amount: 30000, status: 'HELD' };
       mockPaymentsService.createEscrow.mockResolvedValue(response);
 
-      const result = await controller.createEscrow('customer-1', 'booking-1', 'q1');
+      const result = await controller.createEscrow('customer-1', 'booking-1');
 
-      expect(mockPaymentsService.createEscrow).toHaveBeenCalledWith('customer-1', 'booking-1', 'q1');
+      expect(mockPaymentsService.createEscrow).toHaveBeenCalledWith('customer-1', 'booking-1');
       expect(result).toEqual(response);
     });
   });

@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ReviewsService } from './reviews.service';
 import { ReviewsRepository } from '../repositories/reviews.repository';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { BookingsService } from '../../bookings/services/bookings.service';
 
 const REVIEWER_ID = 'customer-uuid-1';
 const PROVIDER_ID = 'provider-uuid-1';
@@ -37,6 +38,7 @@ describe('ReviewsService', () => {
   let repo: any;
   let prisma: any;
   let eventEmitter: any;
+  let bookingsService: any;
 
   beforeEach(async () => {
     repo = {
@@ -57,6 +59,7 @@ describe('ReviewsService', () => {
     };
 
     eventEmitter = { emit: jest.fn() };
+    bookingsService = { close: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -64,6 +67,7 @@ describe('ReviewsService', () => {
         { provide: ReviewsRepository, useValue: repo },
         { provide: PrismaService,     useValue: prisma },
         { provide: EventEmitter2,     useValue: eventEmitter },
+        { provide: BookingsService,   useValue: bookingsService },
       ],
     }).compile();
 
@@ -90,6 +94,14 @@ describe('ReviewsService', () => {
         providerId: PROVIDER_ID,
         rating:     5,
       }));
+    });
+
+    it('closes the booking (releasing escrow) after review creation', async () => {
+      prisma.booking.findUnique.mockResolvedValue(mockCompletedBooking);
+      repo.create.mockResolvedValue(mockReview);
+
+      await service.create(REVIEWER_ID, { bookingId: BOOKING_ID, rating: 5 });
+      expect(bookingsService.close).toHaveBeenCalledWith(BOOKING_ID, 'RELEASE');
     });
 
     it('emits PROVIDER_METRICS_UPDATE after review creation', async () => {

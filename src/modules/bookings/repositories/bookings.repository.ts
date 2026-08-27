@@ -14,13 +14,17 @@ export class BookingsRepository extends BaseRepository {
         customer: { select: { id: true, profile: { select: { displayName: true, avatarUrl: true, city: true } } } },
         provider: { select: { id: true, profile: { select: { displayName: true, avatarUrl: true } } } },
         service: { select: { id: true, title: true, slug: true, startingPrice: true, images: { take: 1 } } },
-        quotation: true, review: true, dispute: true,
+        quotation: true, serviceRequest: true, review: true, dispute: true,
       },
     });
   }
 
   findByQuotationId(quotationId: string) {
     return this.prisma.booking.findUnique({ where: { quotationId } });
+  }
+
+  findByServiceRequestId(serviceRequestId: string) {
+    return this.prisma.booking.findUnique({ where: { serviceRequestId } });
   }
 
   create(data: any) {
@@ -31,6 +35,7 @@ export class BookingsRepository extends BaseRepository {
         provider: { select: { id: true, profile: { select: { displayName: true } } } },
         service: { select: { title: true } },
         quotation: { select: { totalAmount: true } },
+        serviceRequest: { select: { conversationId: true, description: true } },
       },
     });
   }
@@ -47,6 +52,7 @@ export class BookingsRepository extends BaseRepository {
       include: {
         service: { select: { id: true, title: true, images: { take: 1 } } },
         quotation: { select: { totalAmount: true } },
+        serviceRequest: { select: { conversationId: true, description: true } },
         customer: { select: { profile: { select: { displayName: true, avatarUrl: true } } } },
         provider: { select: { profile: { select: { displayName: true, avatarUrl: true } } } },
       },

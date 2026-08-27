@@ -65,4 +65,20 @@ export class ServiceRequestsController {
   cancel(@Param('id', ParseUUIDPipe) id: string, @CurrentUser('id') userId: string) {
     return this.serviceRequestsService.cancel(id, userId);
   }
+
+  @Patch(':id/price/confirm')
+  @ApiOperation({ summary: "Customer confirms the provider's adjusted price" })
+  confirmPrice(@Param('id', ParseUUIDPipe) id: string, @CurrentUser('id') userId: string) {
+    return this.serviceRequestsService.confirmPrice(id, userId);
+  }
+
+  @Patch(':id/price/decline')
+  @ApiOperation({ summary: "Customer declines the provider's adjusted price" })
+  declinePrice(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') userId: string,
+    @Body() dto: DeclineServiceRequestDto,
+  ) {
+    return this.serviceRequestsService.declinePrice(id, userId, dto.reason);
+  }
 }

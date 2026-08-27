@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ServiceStatus } from '@prisma/client';
 import { AdminService } from './admin.service';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { BookingsService } from '../../bookings/services/bookings.service';
 
 const ADMIN_ID   = 'admin-uuid-1';
 const SERVICE_ID = 'service-uuid-1';
@@ -37,6 +38,7 @@ describe('AdminService.reviewService', () => {
         AdminService,
         { provide: PrismaService, useValue: prisma },
         { provide: EventEmitter2, useValue: eventEmitter },
+        { provide: BookingsService, useValue: { close: jest.fn() } },
       ],
     }).compile();
 

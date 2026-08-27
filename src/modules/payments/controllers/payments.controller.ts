@@ -46,9 +46,8 @@ export class PaymentsController {
   createEscrow(
     @CurrentUser('id') customerId: string,
     @Param('bookingId') bookingId: string,
-    @Body('quotationId') quotationId: string,
   ) {
-    return this.paymentsService.createEscrow(customerId, bookingId, quotationId);
+    return this.paymentsService.createEscrow(customerId, bookingId);
   }
 
   // ── Paystack Webhook (public — signature verified inside service) ───────────

@@ -27,6 +27,9 @@ export const validationSchema = Joi.object({
   OTP_EXPIRES_MINUTES: Joi.number().default(10),
   OTP_MAX_ATTEMPTS: Joi.number().default(5),
 
+  // Service requests
+  SERVICE_REQUEST_RESPONSE_TIMEOUT_SECONDS: Joi.number().default(300),
+
   // Rate limiting
   THROTTLE_TTL: Joi.number().default(60000),
   THROTTLE_LIMIT: Joi.number().default(100),

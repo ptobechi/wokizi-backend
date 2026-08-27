@@ -65,6 +65,9 @@ describe('PaymentsService', () => {
       quotation: {
         findUnique: jest.fn(),
       },
+      booking: {
+        findUnique: jest.fn(),
+      },
       escrowReservation: {
         findUnique: jest.fn(),
         create:     jest.fn(),
@@ -302,23 +305,28 @@ describe('PaymentsService', () => {
   // ── createEscrow ──────────────────────────────────────────────────────────
 
   describe('createEscrow', () => {
-    it('returns null for LABOUR_ONLY payment type', async () => {
-      prisma.quotation.findUnique.mockResolvedValue({
-        id: QUOTE_ID, customerId: USER_ID, providerId: 'prov-1',
-        paymentType: PaymentType.LABOUR_ONLY, totalAmount: new Decimal(5000), materialCost: new Decimal(0),
-      });
+    function mockBooking(overrides: Record<string, any> = {}) {
+      return {
+        id: BOOKING_ID, customerId: USER_ID, providerId: 'prov-1',
+        totalAmount: 8000, quotation: null,
+        ...overrides,
+      };
+    }
+
+    it('returns null for LABOUR_ONLY payment type (quotation-origin booking)', async () => {
+      prisma.booking.findUnique.mockResolvedValue(mockBooking({
+        quotation: { id: QUOTE_ID, paymentType: PaymentType.LABOUR_ONLY, totalAmount: new Decimal(5000), materialCost: new Decimal(0) },
+      }));
       prisma.escrowReservation.findUnique.mockResolvedValue(null);
 
-      const result = await service.createEscrow(USER_ID, BOOKING_ID, QUOTE_ID);
+      const result = await service.createEscrow(USER_ID, BOOKING_ID);
       expect(result).toBeNull();
     });
 
-    it('holds material costs for MATERIALS_REQUIRED', async () => {
-      prisma.quotation.findUnique.mockResolvedValue({
-        id: QUOTE_ID, customerId: USER_ID, providerId: 'prov-1',
-        paymentType: PaymentType.MATERIALS_REQUIRED,
-        materialCost: new Decimal(3000), totalAmount: new Decimal(8000),
-      });
+    it('holds material costs for MATERIALS_REQUIRED (quotation-origin booking)', async () => {
+      prisma.booking.findUnique.mockResolvedValue(mockBooking({
+        quotation: { id: QUOTE_ID, paymentType: PaymentType.MATERIALS_REQUIRED, materialCost: new Decimal(3000), totalAmount: new Decimal(8000) },
+      }));
       prisma.escrowReservation.findUnique.mockResolvedValue(null);
       walletService.getWallet.mockResolvedValue(mockWallet);
       walletService.holdFunds.mockResolvedValue({});
@@ -326,17 +334,15 @@ describe('PaymentsService', () => {
       prisma.escrowReservation.create.mockResolvedValue({ id: 'escrow-1', status: 'COMPLETED', amount: new Decimal(3000) });
       prisma.walletTransaction.create.mockResolvedValue({});
 
-      const result = await service.createEscrow(USER_ID, BOOKING_ID, QUOTE_ID);
+      const result = await service.createEscrow(USER_ID, BOOKING_ID);
       expect(walletService.holdFunds).toHaveBeenCalledWith(USER_ID, 3000);
       expect(result).not.toBeNull();
     });
 
-    it('holds full amount for FULL_PROJECT', async () => {
-      prisma.quotation.findUnique.mockResolvedValue({
-        id: QUOTE_ID, customerId: USER_ID, providerId: 'prov-1',
-        paymentType: PaymentType.FULL_PROJECT,
-        totalAmount: new Decimal(8000), materialCost: new Decimal(0),
-      });
+    it('holds full amount for FULL_PROJECT (quotation-origin booking)', async () => {
+      prisma.booking.findUnique.mockResolvedValue(mockBooking({
+        quotation: { id: QUOTE_ID, paymentType: PaymentType.FULL_PROJECT, totalAmount: new Decimal(8000), materialCost: new Decimal(0) },
+      }));
       prisma.escrowReservation.findUnique.mockResolvedValue(null);
       walletService.getWallet.mockResolvedValue(mockWallet);
       walletService.holdFunds.mockResolvedValue({});
@@ -344,48 +350,56 @@ describe('PaymentsService', () => {
       prisma.escrowReservation.create.mockResolvedValue({ id: 'escrow-1', status: 'COMPLETED', amount: new Decimal(8000) });
       prisma.walletTransaction.create.mockResolvedValue({});
 
-      await service.createEscrow(USER_ID, BOOKING_ID, QUOTE_ID);
+      await service.createEscrow(USER_ID, BOOKING_ID);
       expect(walletService.holdFunds).toHaveBeenCalledWith(USER_ID, 8000);
     });
 
+    it('holds the full canonical amount for a ServiceRequest-origin booking (no quotation)', async () => {
+      prisma.booking.findUnique.mockResolvedValue(mockBooking({ quotation: null, totalAmount: 7500 }));
+      prisma.escrowReservation.findUnique.mockResolvedValue(null);
+      walletService.getWallet.mockResolvedValue(mockWallet);
+      walletService.holdFunds.mockResolvedValue({});
+      walletService.getOrCreateWallet.mockResolvedValue(mockWallet);
+      prisma.escrowReservation.create.mockResolvedValue({ id: 'escrow-1', status: 'COMPLETED', amount: new Decimal(7500) });
+      prisma.walletTransaction.create.mockResolvedValue({});
+
+      const result = await service.createEscrow(USER_ID, BOOKING_ID);
+      expect(walletService.holdFunds).toHaveBeenCalledWith(USER_ID, 7500);
+      expect(result).not.toBeNull();
+    });
+
     it('throws BadRequestException when wallet balance insufficient', async () => {
-      prisma.quotation.findUnique.mockResolvedValue({
-        id: QUOTE_ID, customerId: USER_ID, providerId: 'prov-1',
-        paymentType: PaymentType.FULL_PROJECT,
-        totalAmount: new Decimal(50000), materialCost: new Decimal(0),
-      });
+      prisma.booking.findUnique.mockResolvedValue(mockBooking({
+        quotation: { id: QUOTE_ID, paymentType: PaymentType.FULL_PROJECT, totalAmount: new Decimal(50000), materialCost: new Decimal(0) },
+      }));
       prisma.escrowReservation.findUnique.mockResolvedValue(null);
       walletService.getWallet.mockResolvedValue({ ...mockWallet, balance: new Decimal(100) });
 
-      await expect(service.createEscrow(USER_ID, BOOKING_ID, QUOTE_ID))
+      await expect(service.createEscrow(USER_ID, BOOKING_ID))
         .rejects.toThrow(BadRequestException);
     });
 
     it('returns existing escrow idempotently', async () => {
       const existing = { id: 'escrow-1', status: 'COMPLETED' };
-      prisma.quotation.findUnique.mockResolvedValue({
-        id: QUOTE_ID, customerId: USER_ID, providerId: 'prov-1',
-        paymentType: PaymentType.FULL_PROJECT, totalAmount: new Decimal(8000),
-      });
+      prisma.booking.findUnique.mockResolvedValue(mockBooking({
+        quotation: { id: QUOTE_ID, paymentType: PaymentType.FULL_PROJECT, totalAmount: new Decimal(8000) },
+      }));
       prisma.escrowReservation.findUnique.mockResolvedValue(existing);
 
-      const result = await service.createEscrow(USER_ID, BOOKING_ID, QUOTE_ID);
+      const result = await service.createEscrow(USER_ID, BOOKING_ID);
       expect(result).toEqual(existing);
       expect(walletService.holdFunds).not.toHaveBeenCalled();
     });
 
-    it('throws ForbiddenException when customer does not own the quotation', async () => {
-      prisma.quotation.findUnique.mockResolvedValue({
-        id: QUOTE_ID, customerId: 'other-user', providerId: 'prov-1',
-        paymentType: PaymentType.FULL_PROJECT, totalAmount: new Decimal(8000),
-      });
-      await expect(service.createEscrow(USER_ID, BOOKING_ID, QUOTE_ID))
+    it('throws ForbiddenException when customer does not own the booking', async () => {
+      prisma.booking.findUnique.mockResolvedValue(mockBooking({ customerId: 'other-user' }));
+      await expect(service.createEscrow(USER_ID, BOOKING_ID))
         .rejects.toThrow(ForbiddenException);
     });
 
-    it('throws NotFoundException when quotation not found', async () => {
-      prisma.quotation.findUnique.mockResolvedValue(null);
-      await expect(service.createEscrow(USER_ID, BOOKING_ID, QUOTE_ID))
+    it('throws NotFoundException when booking not found', async () => {
+      prisma.booking.findUnique.mockResolvedValue(null);
+      await expect(service.createEscrow(USER_ID, BOOKING_ID))
         .rejects.toThrow(NotFoundException);
     });
   });

@@ -10,4 +10,10 @@ export default registerAs('app', () => ({
   throttleLimit: parseInt(process.env.THROTTLE_LIMIT || '100', 10),
   otpExpiresMinutes: parseInt(process.env.OTP_EXPIRES_MINUTES || '10', 10),
   otpMaxAttempts: parseInt(process.env.OTP_MAX_ATTEMPTS || '5', 10),
+  // How long an artisan has to respond to a new service request before it
+  // auto-expires. Short in dev so the flow can be tested without waiting.
+  serviceRequestResponseTimeoutSeconds: parseInt(
+    process.env.SERVICE_REQUEST_RESPONSE_TIMEOUT_SECONDS || '300',
+    10,
+  ),
 }));

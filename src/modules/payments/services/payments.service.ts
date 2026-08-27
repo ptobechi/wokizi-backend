@@ -229,23 +229,34 @@ export class PaymentsService {
 
   // ── Escrow ────────────────────────────────────────────────────────────────────
 
-  async createEscrow(customerId: string, bookingId: string, quotationId: string) {
-    const quotation = await this.prisma.quotation.findUnique({ where: { id: quotationId } });
-    if (!quotation) throw new NotFoundException('Quotation not found');
-    if (quotation.customerId !== customerId) throw new ForbiddenException();
+  // Keyed off the booking alone (not a quotationId) so this works for both
+  // booking origins. A Quotation-origin booking keeps its existing
+  // payment-type-aware amount (LABOUR_ONLY needs no escrow at all); a
+  // ServiceRequest-origin booking has no such concept and always escrows
+  // the full canonical Booking.totalAmount up front.
+  async createEscrow(customerId: string, bookingId: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: { quotation: true },
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+    if (booking.customerId !== customerId) throw new ForbiddenException();
 
     const existing = await this.prisma.escrowReservation.findUnique({ where: { bookingId } });
     if (existing) return existing;
 
-    const paymentType  = (quotation as any).paymentType as PaymentType;
-    let escrowAmount   = 0;
-
-    if (paymentType === PaymentType.MATERIALS_REQUIRED) {
-      escrowAmount = Number(quotation.materialCost);
-    } else if (paymentType === PaymentType.FULL_PROJECT) {
-      escrowAmount = Number(quotation.totalAmount);
+    let escrowAmount = 0;
+    if (booking.quotation) {
+      const paymentType = (booking.quotation as any).paymentType as PaymentType;
+      if (paymentType === PaymentType.MATERIALS_REQUIRED) {
+        escrowAmount = Number(booking.quotation.materialCost);
+      } else if (paymentType === PaymentType.FULL_PROJECT) {
+        escrowAmount = Number(booking.quotation.totalAmount);
+      } else {
+        return null; // LABOUR_ONLY
+      }
     } else {
-      return null; // LABOUR_ONLY
+      escrowAmount = Number(booking.totalAmount);
     }
 
     if (escrowAmount <= 0) return null;
@@ -263,7 +274,7 @@ export class PaymentsService {
       data: {
         bookingId,
         customerId,
-        providerId: quotation.providerId,
+        providerId: booking.providerId,
         amount:     new Decimal(escrowAmount),
         status:     PaymentStatus.COMPLETED,
       },

@@ -23,16 +23,19 @@ export class TrackingService {
       include: {
         customer: true,
         provider: { include: { profile: { select: { displayName: true } } } },
-        quotation: { include: { serviceRequest: true } },
+        serviceRequest: true,
       },
     });
     if (!booking) throw new NotFoundException('Booking not found');
     if (booking.providerId !== artisanId) throw new ForbiddenException();
 
     // The job-site coordinates the customer supplied when they sent the
-    // original request — carried through Booking → Quotation → ServiceRequest
-    // since Booking itself has no location fields of its own.
-    const destination = (booking as any).quotation?.serviceRequest;
+    // original request, carried directly on Booking.serviceRequest — since
+    // Booking itself has no location fields of its own. A booking that
+    // originated from a manual in-chat Quotation instead of a ServiceRequest
+    // has no destination coordinates here (that path predates GPS tracking
+    // on this flow); `destination` is simply undefined in that case.
+    const destination = booking.serviceRequest;
 
     const session = await this.prisma.trackingSession.upsert({
       where:  { bookingId },

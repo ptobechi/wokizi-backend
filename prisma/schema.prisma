@@ -91,6 +91,7 @@ enum BookingStatus {
   COMPLETED
   CANCELLED
   DISPUTED
+  CLOSED // reached only via review submission or dispute resolution — never via the generic status PATCH
 }
 
 enum MessageType {
@@ -120,6 +121,7 @@ enum NotificationType {
   REQUEST_REJECTED // Provider declined → notify client
   REQUEST_PRICE_ADJUSTED // Provider changed the price → notify client
   REQUEST_PRICE_ACCEPTED // Client accepted the (possibly adjusted) price → notify provider
+  REQUEST_PRICE_DECLINED // Client declined the adjusted price → notify provider
   REQUEST_EXPIRED // Request went unanswered past its expiry → notify client
 
   // ── Quotations ─────────────────────────────────────────────────────────
@@ -733,6 +735,7 @@ model MessageMedia {
 
 enum ServiceRequestStatus {
   PENDING
+  PRICE_UPDATED // artisan adjusted the price — awaiting customer confirmation
   ACCEPTED
   DECLINED
   EXPIRED
@@ -758,22 +761,37 @@ model ServiceRequest {
   status         ServiceRequestStatus @default(PENDING)
   expiresAt      DateTime
   respondedAt    DateTime?
-  quotationId    String?              @unique
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
-  conversation Conversation          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  customer     User                  @relation("CustomerServiceRequests", fields: [customerId], references: [id])
-  provider     User                  @relation("ProviderServiceRequests", fields: [providerId], references: [id])
-  service      ServiceListing        @relation(fields: [serviceId], references: [id])
-  quotation    Quotation?            @relation(fields: [quotationId], references: [id])
+  conversation Conversation                 @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  customer     User                         @relation("CustomerServiceRequests", fields: [customerId], references: [id])
+  provider     User                         @relation("ProviderServiceRequests", fields: [providerId], references: [id])
+  service      ServiceListing               @relation(fields: [serviceId], references: [id])
   images       ServiceRequestImage[]
+  priceHistory ServiceRequestPriceHistory[]
+  booking      Booking?
 
   @@index([providerId, status])
   @@index([customerId])
   @@index([expiresAt])
   @@index([conversationId])
   @@map("service_requests")
+}
+
+model ServiceRequestPriceHistory {
+  id               String   @id @default(uuid())
+  serviceRequestId String
+  previousPrice    Float
+  newPrice         Float
+  reason           String?
+  changedBy        String
+  createdAt        DateTime @default(now())
+
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+
+  @@index([serviceRequestId])
+  @@map("service_request_price_history")
 }
 
 model ServiceRequestImage {
@@ -818,15 +836,14 @@ model Quotation {
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
-  conversation   Conversation    @relation(fields: [conversationId], references: [id])
-  service        ServiceListing? @relation(fields: [serviceId], references: [id])
-  provider       User            @relation("ProviderQuotations", fields: [providerId], references: [id])
-  customer       User            @relation("CustomerQuotations", fields: [customerId], references: [id])
-  parent         Quotation?      @relation("QuotationRevisions", fields: [parentId], references: [id])
-  revisions      Quotation[]     @relation("QuotationRevisions")
-  booking        Booking?
-  items          QuotationItem[]
-  serviceRequest ServiceRequest?
+  conversation Conversation    @relation(fields: [conversationId], references: [id])
+  service      ServiceListing? @relation(fields: [serviceId], references: [id])
+  provider     User            @relation("ProviderQuotations", fields: [providerId], references: [id])
+  customer     User            @relation("CustomerQuotations", fields: [customerId], references: [id])
+  parent       Quotation?      @relation("QuotationRevisions", fields: [parentId], references: [id])
+  revisions    Quotation[]     @relation("QuotationRevisions")
+  booking      Booking?
+  items        QuotationItem[]
 
   @@index([conversationId])
   @@index([providerId])
@@ -858,26 +875,35 @@ model QuotationItem {
 // ─────────────────────────────────────────
 
 model Booking {
-  id              String        @id @default(uuid())
-  customerId      String
-  providerId      String
-  serviceId       String
-  quotationId     String        @unique
-  status          BookingStatus @default(PENDING)
-  scheduledAt     DateTime?
-  startedAt       DateTime?
-  completedAt     DateTime?
-  cancelledAt     DateTime?
-  cancelReason    String?
-  completionNotes String?
-  providerNotes   String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id               String        @id @default(uuid())
+  customerId       String
+  providerId       String
+  serviceId        String
+  // Exactly one of these two is set — the origin determines which. Enforced
+  // in application code (BookingsService), matching this schema's existing
+  // convention of no DB-level CHECK constraints.
+  quotationId      String?       @unique
+  serviceRequestId String?       @unique
+  // Canonical price regardless of origin — added so consumers (admin dispute
+  // view, mobile) never need to reach through quotation/serviceRequest to
+  // find "how much is this booking for".
+  totalAmount      Float
+  status           BookingStatus @default(PENDING)
+  scheduledAt      DateTime?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  cancelledAt      DateTime?
+  cancelReason     String?
+  completionNotes  String?
+  providerNotes    String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   customer          User               @relation("CustomerBookings", fields: [customerId], references: [id])
   provider          User               @relation("ProviderBookings", fields: [providerId], references: [id])
   service           ServiceListing     @relation(fields: [serviceId], references: [id])
-  quotation         Quotation          @relation(fields: [quotationId], references: [id])
+  quotation         Quotation?         @relation(fields: [quotationId], references: [id])
+  serviceRequest    ServiceRequest?    @relation(fields: [serviceRequestId], references: [id])
   review            Review?
   dispute           Dispute?
   trackingSession   TrackingSession?

@@ -1,20 +1,33 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  ArrayMaxSize, IsArray, IsInt, IsOptional, IsString, Max, MaxLength, Min,
+} from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { ReviewsRepository } from '../repositories/reviews.repository';
 import { PaginatedResponseDto } from '../../../common/dto/base-response.dto';
 import { EventName } from '../../../common/enums';
+import { BookingsService } from '../../bookings/services/bookings.service';
 
 export class CreateReviewDto {
-  bookingId: string;
-  rating: number;
-  comment?: string;
+  @ApiProperty() @IsString() bookingId: string;
+  @ApiProperty({ minimum: 1, maximum: 5 }) @IsInt() @Min(1) @Max(5) rating: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) comment?: string;
+
+  @ApiPropertyOptional({ type: [String], description: 'Already-uploaded image URLs (max 8)' })
+  @IsOptional() @IsArray() @ArrayMaxSize(8) @IsString({ each: true })
   images?: string[];
 }
 
 @Injectable()
 export class ReviewsService {
-  constructor(private repo: ReviewsRepository, private prisma: PrismaService, private eventEmitter: EventEmitter2) {}
+  constructor(
+    private repo: ReviewsRepository,
+    private prisma: PrismaService,
+    private eventEmitter: EventEmitter2,
+    private bookingsService: BookingsService,
+  ) {}
 
   async create(reviewerId: string, dto: CreateReviewDto) {
     const booking = await this.prisma.booking.findUnique({ where: { id: dto.bookingId }, include: { review: true } });
@@ -30,6 +43,10 @@ export class ReviewsService {
     });
 
     this.eventEmitter.emit(EventName.PROVIDER_METRICS_UPDATE, { providerId: booking.providerId });
+
+    // The review is the gate: a booking cannot reach CLOSED (and escrow
+    // cannot release) until either this happens or a dispute is resolved.
+    await this.bookingsService.close(dto.bookingId, 'RELEASE');
 
     const reviewerProfile = await this.prisma.userProfile.findUnique({
       where: { userId: reviewerId }, select: { displayName: true },

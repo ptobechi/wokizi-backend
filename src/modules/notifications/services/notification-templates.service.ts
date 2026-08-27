@@ -85,6 +85,11 @@ const TEMPLATES: Partial<Record<NotificationType, TemplateFactory>> = {
     body: `${userName ?? 'The client'} accepted your price. You can now proceed to scheduling.`,
   }),
 
+  REQUEST_PRICE_DECLINED: ({ userName, rejectionReason }) => ({
+    title: 'Price Declined',
+    body: `${userName ?? 'The client'} declined your adjusted price${rejectionReason ? `: ${rejectionReason}` : '.'}`,
+  }),
+
   REQUEST_EXPIRED: () => ({
     title: 'Request Expired',
     body: 'Your service request went unanswered and has expired. Try requesting another nearby artisan.',

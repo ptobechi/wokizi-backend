@@ -7,6 +7,7 @@ import { PrismaService } from '../../../core/prisma/prisma.service';
 import { PaginatedResponseDto } from '../../../common/dto/base-response.dto';
 import { EventName } from '../../../common/enums';
 import { publishFields, unpublishFields, suspendPublicationFields } from '../../services/utils/service-publication.util';
+import { BookingsService } from '../../bookings/services/bookings.service';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ export class AdminService {
   constructor(
     private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
+    private bookingsService: BookingsService,
   ) {}
 
   // ── Dashboard ───────────────────────────────────────────────────────────────
@@ -218,7 +220,7 @@ export class AdminService {
           customer:  { select: { id: true, phone: true, profile: { select: { displayName: true, avatarUrl: true } } } },
           provider:  { select: { id: true, phone: true, profile: { select: { displayName: true, avatarUrl: true } } } },
           service:   { select: { id: true, title: true, category: { select: { name: true } } } },
-          quotation: { select: { totalAmount: true, status: true } },
+          quotation: { select: { status: true } },
         },
         skip, take: limit, orderBy: { createdAt: 'desc' },
       }),
@@ -234,7 +236,8 @@ export class AdminService {
         customer:  { select: { id: true, phone: true, email: true, profile: { select: { displayName: true, avatarUrl: true } } } },
         provider:  { select: { id: true, phone: true, email: true, profile: { select: { displayName: true, avatarUrl: true } } } },
         service:   { select: { id: true, title: true, description: true, startingPrice: true, category: { select: { name: true } } } },
-        quotation: { include: { items: true } },
+        quotation:      { include: { items: true } },
+        serviceRequest: true,
         dispute:   { select: { id: true, status: true, reason: true, createdAt: true } },
         trackingSession: true,
       },
@@ -256,7 +259,7 @@ export class AdminService {
         include: {
           raisedBy: { select: { id: true, phone: true, profile: { select: { displayName: true, avatarUrl: true } } } },
           provider: { select: { id: true, phone: true, profile: { select: { displayName: true, avatarUrl: true } } } },
-          booking:  { select: { id: true, service: { select: { title: true } }, quotation: { select: { totalAmount: true } } } },
+          booking:  { select: { id: true, totalAmount: true, service: { select: { title: true } } } },
           evidence: { select: { id: true, fileUrl: true, fileName: true, uploadedBy: true } },
         },
         skip, take: limit, orderBy: { createdAt: 'desc' },
@@ -274,8 +277,9 @@ export class AdminService {
         provider: { select: { id: true, phone: true, email: true, profile: { select: { displayName: true, avatarUrl: true } } } },
         booking:  {
           include: {
-            service:   { select: { id: true, title: true } },
-            quotation: { include: { items: true } },
+            service:        { select: { id: true, title: true } },
+            quotation:      { include: { items: true } },
+            serviceRequest: true,
           },
         },
         evidence: true,
@@ -285,13 +289,34 @@ export class AdminService {
     return dispute;
   }
 
-  async resolveDispute(disputeId: string, adminId: string, resolution: string, notes?: string) {
+  // `outcome` decides where the held escrow goes. Only full release/full
+  // refund are supported — a true partial split would need a new wallet
+  // primitive that doesn't exist yet, so a partial outcome must be handled
+  // as a manual admin wallet adjustment outside this endpoint for now.
+  async resolveDispute(
+    disputeId: string,
+    adminId: string,
+    outcome: 'RESOLVED_FOR_CUSTOMER' | 'RESOLVED_FOR_PROVIDER',
+    resolution: string,
+    notes?: string,
+  ) {
     const dispute = await this.prisma.dispute.findUnique({ where: { id: disputeId } });
     if (!dispute) throw new NotFoundException('Dispute not found');
+    if (dispute.status === DisputeStatus.RESOLVED) throw new BadRequestException('Dispute already resolved');
+
     const updated = await this.prisma.dispute.update({
       where: { id: disputeId },
       data: { status: DisputeStatus.RESOLVED, resolution, adminNotes: notes, resolvedBy: adminId, resolvedAt: new Date() },
     });
+
+    // Moves the booking DISPUTED → CLOSED and fires the matching escrow
+    // action — the single, server-controlled point where a dispute
+    // outcome ever touches money.
+    await this.bookingsService.close(
+      dispute.bookingId,
+      outcome === 'RESOLVED_FOR_CUSTOMER' ? 'REFUND' : 'RELEASE',
+    );
+
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
       userId: dispute.raisedById, type: 'DISPUTE_RESOLVED',
       ctx: { resolution }, linkData: { disputeId },

@@ -32,6 +32,15 @@ export class BookingsService {
   ) {}
 
   async create(customerId: string, dto: CreateBookingDto) {
+    if (!dto.quotationId === !dto.serviceRequestId) {
+      throw new BadRequestException('Provide exactly one of quotationId or serviceRequestId');
+    }
+    return dto.quotationId
+      ? this.createFromQuotation(customerId, dto)
+      : this.createFromServiceRequest(customerId, dto);
+  }
+
+  private async createFromQuotation(customerId: string, dto: CreateBookingDto) {
     const quotation = await this.prisma.quotation.findUnique({
       where: { id: dto.quotationId },
       include: { service: { select: { title: true } } },
@@ -39,8 +48,12 @@ export class BookingsService {
     if (!quotation)                                           throw new NotFoundException('Quotation not found');
     if (quotation.customerId !== customerId)                  throw new ForbiddenException('Not your quotation');
     if (quotation.status !== QuotationStatus.ACCEPTED)       throw new BadRequestException('Only ACCEPTED quotations can be booked');
+    // A manual in-chat quote can be sent without a linked service (e.g. a
+    // general-inquiry conversation) — Booking.serviceId is required, so that
+    // can't be converted into a booking. Reject clearly rather than crash.
+    if (!quotation.serviceId) throw new BadRequestException('This quotation has no linked service and cannot be booked');
 
-    const exists = await this.repo.findByQuotationId(dto.quotationId);
+    const exists = await this.repo.findByQuotationId(dto.quotationId!);
     if (exists) throw new BadRequestException('Booking already exists for this quotation');
 
     // Validate requested date against provider availability slots
@@ -67,16 +80,10 @@ export class BookingsService {
       providerId:    quotation.providerId,
       serviceId:     quotation.serviceId,
       quotationId:   dto.quotationId,
+      totalAmount:   quotation.totalAmount,
       status:        needsEscrow ? BookingStatus.PENDING : BookingStatus.CONFIRMED,
       scheduledAt:   dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
       providerNotes: dto.notes,
-    });
-
-    // If this quotation originated from a ServiceRequest, mark it CONVERTED
-    // now that a real Booking exists for it.
-    await this.prisma.serviceRequest.updateMany({
-      where: { quotationId: dto.quotationId, status: 'ACCEPTED' as any },
-      data:  { status: 'CONVERTED' as any },
     });
 
     if (!needsEscrow) {
@@ -87,6 +94,49 @@ export class BookingsService {
         linkData: { bookingId: booking.id },
       });
     }
+
+    return booking;
+  }
+
+  // Direct request-flow origin. Unlike the Quotation path, this flow has no
+  // LABOUR_ONLY concept — the request's (possibly artisan-adjusted) price is
+  // always paid upfront via escrow before the booking is confirmed.
+  private async createFromServiceRequest(customerId: string, dto: CreateBookingDto) {
+    const request = await this.prisma.serviceRequest.findUnique({ where: { id: dto.serviceRequestId } });
+    if (!request)                            throw new NotFoundException('Service request not found');
+    if (request.customerId !== customerId)   throw new ForbiddenException('Not your request');
+    if (request.status !== 'ACCEPTED')       throw new BadRequestException('Only accepted requests can be booked');
+
+    const exists = await this.repo.findByServiceRequestId(dto.serviceRequestId!);
+    if (exists) throw new BadRequestException('Booking already exists for this request');
+
+    if (dto.scheduledAt) {
+      const avail = await this.checkAvailability(request.serviceId, dto.scheduledAt);
+      if (!avail.available) {
+        throw new BadRequestException(avail.reason ?? 'Provider is not available on the requested date');
+      }
+    }
+
+    const totalAmount = request.adjustedPrice ?? request.basePrice;
+
+    const booking = await this.repo.create({
+      customerId,
+      providerId:       request.providerId,
+      serviceId:        request.serviceId,
+      serviceRequestId: request.id,
+      totalAmount,
+      status:            BookingStatus.PENDING,
+      scheduledAt:       dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
+      providerNotes:     dto.notes,
+    });
+
+    // Compare-and-swap so this can't double-fire if create() is somehow
+    // called twice concurrently — the findByServiceRequestId check above
+    // already guards the common case, this guards the race.
+    await this.prisma.serviceRequest.updateMany({
+      where: { id: request.id, status: 'ACCEPTED' },
+      data:  { status: 'CONVERTED' as any },
+    });
 
     return booking;
   }
@@ -118,7 +168,11 @@ export class BookingsService {
 
     if (dto.status === 'COMPLETED') {
       this.eventEmitter.emit(EventName.PROVIDER_METRICS_UPDATE, { providerId: booking.providerId });
-      this.eventEmitter.emit(EventName.ESCROW_RELEASED, { bookingId, release: true });
+      // Escrow release no longer fires here — COMPLETED is not the same as
+      // CLOSED. Release now happens only via close(), triggered by a
+      // submitted review or a resolved dispute, so a legitimate dispute
+      // opened between COMPLETED and review can never be raced by an
+      // accidental early release.
     }
     if (dto.status === 'CANCELLED') {
       this.eventEmitter.emit(EventName.ESCROW_REFUNDED, { bookingId, refund: true });
@@ -133,14 +187,13 @@ export class BookingsService {
       linkData: { bookingId },
     });
 
-    // Auto-close the conversation when the booking lifecycle ends
+    // Auto-close the conversation when the booking lifecycle ends. `booking`
+    // (from repo.findById) already carries both possible origins — exactly
+    // one is set depending on whether this booking came from a Quotation or
+    // a ServiceRequest.
     if (dto.status === 'COMPLETED' || dto.status === 'CANCELLED') {
-      const quotation = await this.prisma.quotation.findUnique({
-        where: { id: booking.quotationId },
-        select: { conversationId: true },
-      });
-      if (quotation?.conversationId) {
-        const convId = quotation.conversationId;
+      const convId = (booking as any).quotation?.conversationId ?? (booking as any).serviceRequest?.conversationId;
+      if (convId) {
 
         await this.prisma.conversation.update({
           where: { id: convId },
@@ -173,6 +226,32 @@ export class BookingsService {
     }
 
     return updated;
+  }
+
+  // Internal — not exposed via the generic status PATCH. CLOSED is only
+  // reachable through a submitted review (ReviewsService.create) or a
+  // resolved dispute (AdminService.resolveDispute), never via arbitrary
+  // client action, and this is the single trigger point for escrow
+  // finalization following COMPLETED.
+  async close(bookingId: string, escrowAction: 'RELEASE' | 'REFUND' | 'NONE' = 'RELEASE') {
+    const booking = await this.repo.findById(bookingId);
+    if (!booking) throw new NotFoundException('Booking not found');
+    if (booking.status !== 'COMPLETED' && booking.status !== 'DISPUTED') {
+      throw new BadRequestException(`Cannot close a booking in status ${booking.status}`);
+    }
+
+    // Compare-and-swap guards a review-submit and a dispute-resolve racing
+    // to close the same booking.
+    const result = await this.prisma.booking.updateMany({
+      where: { id: bookingId, status: booking.status as BookingStatus },
+      data:  { status: BookingStatus.CLOSED },
+    });
+    if (result.count === 0) throw new BadRequestException('Booking is already closed');
+
+    if (escrowAction === 'RELEASE') this.eventEmitter.emit(EventName.ESCROW_RELEASED, { bookingId, release: true });
+    if (escrowAction === 'REFUND')  this.eventEmitter.emit(EventName.ESCROW_REFUNDED, { bookingId, refund: true });
+
+    return this.repo.findById(bookingId);
   }
 
   async findById(bookingId: string, userId: string) {

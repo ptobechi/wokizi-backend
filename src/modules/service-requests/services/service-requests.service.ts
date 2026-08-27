@@ -1,13 +1,11 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { ConversationsService } from '../../conversations/services/conversations.service';
 import { ServiceRequestsRepository } from '../repositories/service-requests.repository';
 import { AdjustPriceDto, CreateServiceRequestDto, DeclineServiceRequestDto } from '../dto/requests/service-request.dto';
 import { EventName } from '../../../common/enums';
-
-// Pending requests expire after this window if the provider never responds.
-const REQUEST_EXPIRY_HOURS = 24;
 
 @Injectable()
 export class ServiceRequestsService implements OnModuleInit {
@@ -18,14 +16,23 @@ export class ServiceRequestsService implements OnModuleInit {
     private prisma: PrismaService,
     private conversationsService: ConversationsService,
     private eventEmitter: EventEmitter2,
+    private config: ConfigService,
   ) {}
 
   onModuleInit() {
-    // Same pattern as QuotationsService's expiry sweep: run once at startup,
-    // then hourly. Kept as its own interval (rather than piggybacking on
-    // QuotationsService's) so each module owns its own model's lifecycle.
+    // Server-authoritative expiration sweep. Same setInterval-in-onModuleInit
+    // pattern as QuotationsService's expiry sweep, but much tighter — the
+    // response window here is short (as low as 30s in dev), so the sweep has
+    // to run frequently enough that "expired" is enforced promptly rather
+    // than hours late. Survives restarts (re-registered on every boot) and
+    // is safe across multiple instances (each sweep is an idempotent,
+    // conditional updateMany).
     this.expireStaleRequests();
-    setInterval(() => this.expireStaleRequests(), 60 * 60 * 1000);
+    setInterval(() => this.expireStaleRequests(), 20 * 1000);
+  }
+
+  private responseTimeoutSeconds(): number {
+    return this.config.get<number>('app.serviceRequestResponseTimeoutSeconds', 300);
   }
 
   private async expireStaleRequests() {
@@ -92,7 +99,7 @@ export class ServiceRequestsService implements OnModuleInit {
       longitude:      dto.longitude,
       savedAddressId: dto.savedAddressId,
       basePrice:      service.startingPrice, // server-derived — never trust a client-supplied price
-      expiresAt:      new Date(Date.now() + REQUEST_EXPIRY_HOURS * 60 * 60 * 1000),
+      expiresAt:      new Date(Date.now() + this.responseTimeoutSeconds() * 1000),
       images: dto.images?.length
         ? { create: dto.images.map((url, i) => ({ url, sortOrder: i })) }
         : undefined,
@@ -157,62 +164,54 @@ export class ServiceRequestsService implements OnModuleInit {
   async accept(id: string, providerId: string, dto?: AdjustPriceDto) {
     const finalPrice = dto?.price;
 
-    const { request, quotation } = await this.prisma.$transaction(async (tx) => {
+    const request = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.serviceRequest.findUnique({ where: { id } });
       if (!existing) throw new NotFoundException('Service request not found');
       if (existing.providerId !== providerId) throw new ForbiddenException('Not your request');
+      // Server-authoritative deadline enforcement — never trust the client's
+      // clock or a mobile-side countdown to gate this.
+      if (existing.expiresAt <= new Date()) throw new BadRequestException('This request has expired');
+
+      const price = finalPrice ?? existing.basePrice;
+      if (price <= 0) throw new BadRequestException('Price must be greater than zero');
+      const priceChanged = finalPrice != null && finalPrice !== existing.basePrice;
 
       // Compare-and-swap: only succeeds if it's still PENDING. Guards double
       // taps and a second provider action racing the first.
       const result = await tx.serviceRequest.updateMany({
         where: { id, status: 'PENDING' },
         data: {
-          status:        'ACCEPTED',
+          status:        priceChanged ? 'PRICE_UPDATED' : 'ACCEPTED',
           adjustedPrice: finalPrice ?? null,
-          priceReason:   finalPrice != null ? dto?.reason : null,
+          priceReason:   priceChanged ? dto?.reason : null,
           respondedAt:   new Date(),
         },
       });
       if (result.count === 0) throw new BadRequestException('This request has already been responded to');
 
-      const price = finalPrice ?? existing.basePrice;
-      if (price <= 0) throw new BadRequestException('Price must be greater than zero');
+      if (priceChanged) {
+        await tx.serviceRequestPriceHistory.create({
+          data: {
+            serviceRequestId: id,
+            previousPrice:    existing.basePrice,
+            newPrice:         price,
+            reason:           dto?.reason,
+            changedBy:        providerId,
+          },
+        });
+      }
 
-      // Auto-generates the Quotation the existing negotiation/booking chain
-      // already knows how to carry forward — the customer still explicitly
-      // accepts it via the existing, untouched POST /quotations/:id/respond.
-      // If the price was adjusted, the reason rides in `notes` — the exact
-      // same field the existing QuoteCard UI already renders, so the
-      // customer sees why without any new screen.
-      const priceChanged = finalPrice != null && finalPrice !== existing.basePrice;
-      const quotation = await tx.quotation.create({
-        data: {
-          conversationId: existing.conversationId,
-          serviceId:      existing.serviceId,
-          providerId:     existing.providerId,
-          customerId:     existing.customerId,
-          description:    existing.description,
-          labourCost:     price,
-          totalAmount:    price,
-          status:         'PENDING',
-          notes:          priceChanged ? dto?.reason : undefined,
-        },
-      });
-
-      await tx.serviceRequest.update({ where: { id }, data: { quotationId: quotation.id } });
-
-      const updated = await tx.serviceRequest.findUnique({ where: { id } });
-      return { request: updated!, quotation };
+      return tx.serviceRequest.findUnique({ where: { id } });
     });
 
     const providerProfile = await this.prisma.userProfile.findUnique({
       where: { userId: providerId }, select: { displayName: true },
     });
     this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
-      userId:   request.customerId,
-      type:     finalPrice != null ? 'REQUEST_PRICE_ADJUSTED' : 'REQUEST_ACCEPTED',
-      ctx:      { artisanName: providerProfile?.displayName, amount: String(finalPrice ?? request.basePrice) },
-      linkData: { conversationId: request.conversationId, quotationId: quotation.id },
+      userId:   request!.customerId,
+      type:     finalPrice != null && finalPrice !== request!.basePrice ? 'REQUEST_PRICE_ADJUSTED' : 'REQUEST_ACCEPTED',
+      ctx:      { artisanName: providerProfile?.displayName, amount: String(finalPrice ?? request!.basePrice) },
+      linkData: { conversationId: request!.conversationId, requestId: id },
     });
 
     return this.repo.findById(id);
@@ -223,6 +222,7 @@ export class ServiceRequestsService implements OnModuleInit {
       const existing = await tx.serviceRequest.findUnique({ where: { id } });
       if (!existing) throw new NotFoundException('Service request not found');
       if (existing.providerId !== providerId) throw new ForbiddenException('Not your request');
+      if (existing.expiresAt <= new Date()) throw new BadRequestException('This request has expired');
 
       const result = await tx.serviceRequest.updateMany({
         where: { id, status: 'PENDING' },
@@ -243,7 +243,65 @@ export class ServiceRequestsService implements OnModuleInit {
     return this.repo.findById(id);
   }
 
-  // ── Customer action ──────────────────────────────────────────────────────
+  // ── Customer actions ─────────────────────────────────────────────────────
+
+  // Customer explicitly confirms a provider's price adjustment — the
+  // provider can never self-confirm their own change.
+  async confirmPrice(id: string, customerId: string) {
+    const request = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.serviceRequest.findUnique({ where: { id } });
+      if (!existing) throw new NotFoundException('Service request not found');
+      if (existing.customerId !== customerId) throw new ForbiddenException('Not your request');
+
+      const result = await tx.serviceRequest.updateMany({
+        where: { id, status: 'PRICE_UPDATED' },
+        data:  { status: 'ACCEPTED' },
+      });
+      if (result.count === 0) throw new BadRequestException('There is no price update to confirm');
+
+      return tx.serviceRequest.findUnique({ where: { id } });
+    });
+
+    const customerProfile = await this.prisma.userProfile.findUnique({
+      where: { userId: customerId }, select: { displayName: true },
+    });
+    this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+      userId:   request!.providerId,
+      type:     'REQUEST_PRICE_ACCEPTED',
+      ctx:      { userName: customerProfile?.displayName },
+      linkData: { conversationId: request!.conversationId, requestId: id },
+    });
+
+    return this.repo.findById(id);
+  }
+
+  async declinePrice(id: string, customerId: string, reason?: string) {
+    const request = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.serviceRequest.findUnique({ where: { id } });
+      if (!existing) throw new NotFoundException('Service request not found');
+      if (existing.customerId !== customerId) throw new ForbiddenException('Not your request');
+
+      const result = await tx.serviceRequest.updateMany({
+        where: { id, status: 'PRICE_UPDATED' },
+        data:  { status: 'DECLINED', declineReason: reason, respondedAt: new Date() },
+      });
+      if (result.count === 0) throw new BadRequestException('There is no price update to decline');
+
+      return tx.serviceRequest.findUnique({ where: { id } });
+    });
+
+    const customerProfile = await this.prisma.userProfile.findUnique({
+      where: { userId: customerId }, select: { displayName: true },
+    });
+    this.eventEmitter.emit(EventName.NOTIFICATION_SEND, {
+      userId:   request!.providerId,
+      type:     'REQUEST_PRICE_DECLINED',
+      ctx:      { userName: customerProfile?.displayName, rejectionReason: reason },
+      linkData: { conversationId: request!.conversationId },
+    });
+
+    return this.repo.findById(id);
+  }
 
   async cancel(id: string, customerId: string) {
     const result = await this.prisma.serviceRequest.updateMany({

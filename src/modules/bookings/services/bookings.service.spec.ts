@@ -51,12 +51,13 @@ describe('BookingsService', () => {
 
   beforeEach(async () => {
     repo = {
-      findById:          jest.fn(),
-      findByQuotationId: jest.fn(),
-      create:            jest.fn(),
-      update:            jest.fn(),
-      findAllByUser:     jest.fn(),
-      countByUser:       jest.fn(),
+      findById:              jest.fn(),
+      findByQuotationId:     jest.fn(),
+      findByServiceRequestId: jest.fn(),
+      create:                jest.fn(),
+      update:                jest.fn(),
+      findAllByUser:         jest.fn(),
+      countByUser:           jest.fn(),
     };
 
     prisma = {
@@ -78,7 +79,11 @@ describe('BookingsService', () => {
         create: jest.fn(),
       },
       serviceRequest: {
+        findUnique: jest.fn(),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      booking: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     };
 
@@ -141,6 +146,12 @@ describe('BookingsService', () => {
 
     it('throws BadRequestException when quotation is not ACCEPTED', async () => {
       prisma.quotation.findUnique.mockResolvedValue({ ...mockQuotation, status: QuotationStatus.PENDING });
+      await expect(service.create(CUSTOMER_ID, { quotationId: QUOTE_ID }))
+        .rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when the quotation has no linked service', async () => {
+      prisma.quotation.findUnique.mockResolvedValue({ ...mockQuotation, serviceId: null });
       await expect(service.create(CUSTOMER_ID, { quotationId: QUOTE_ID }))
         .rejects.toThrow(BadRequestException);
     });
@@ -209,6 +220,115 @@ describe('BookingsService', () => {
       await expect(service.create(CUSTOMER_ID, { quotationId: QUOTE_ID, scheduledAt: saturday }))
         .rejects.toThrow(BadRequestException);
     });
+
+    it('throws BadRequestException when neither quotationId nor serviceRequestId is provided', async () => {
+      await expect(service.create(CUSTOMER_ID, {} as any)).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when both quotationId and serviceRequestId are provided', async () => {
+      await expect(service.create(CUSTOMER_ID, { quotationId: QUOTE_ID, serviceRequestId: 'req-1' } as any))
+        .rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ── create (from ServiceRequest — direct request flow) ──────────────────────
+
+  describe('create — from ServiceRequest', () => {
+    const REQUEST_ID = 'request-uuid-1';
+    const mockAcceptedRequest = {
+      id:             REQUEST_ID,
+      customerId:     CUSTOMER_ID,
+      providerId:     PROVIDER_ID,
+      serviceId:      SERVICE_ID,
+      status:         'ACCEPTED',
+      basePrice:      5000,
+      adjustedPrice:  null,
+    };
+
+    it('creates a PENDING booking priced from the request and marks it CONVERTED', async () => {
+      prisma.serviceRequest.findUnique.mockResolvedValue(mockAcceptedRequest);
+      repo.findByServiceRequestId.mockResolvedValue(null);
+      repo.create.mockResolvedValue({ ...mockBooking, serviceRequestId: REQUEST_ID, quotationId: null, totalAmount: 5000, status: 'PENDING' });
+
+      const result = await service.create(CUSTOMER_ID, { serviceRequestId: REQUEST_ID });
+      expect(result.status).toBe('PENDING');
+      expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({
+        serviceRequestId: REQUEST_ID, totalAmount: 5000, status: 'PENDING',
+      }));
+      expect(prisma.serviceRequest.updateMany).toHaveBeenCalledWith({
+        where: { id: REQUEST_ID, status: 'ACCEPTED' },
+        data:  { status: 'CONVERTED' },
+      });
+    });
+
+    it('uses the artisan-adjusted price when present', async () => {
+      prisma.serviceRequest.findUnique.mockResolvedValue({ ...mockAcceptedRequest, adjustedPrice: 7500 });
+      repo.findByServiceRequestId.mockResolvedValue(null);
+      repo.create.mockResolvedValue({ ...mockBooking, totalAmount: 7500 });
+
+      await service.create(CUSTOMER_ID, { serviceRequestId: REQUEST_ID });
+      expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ totalAmount: 7500 }));
+    });
+
+    it('throws NotFoundException when request not found', async () => {
+      prisma.serviceRequest.findUnique.mockResolvedValue(null);
+      await expect(service.create(CUSTOMER_ID, { serviceRequestId: 'bad' })).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ForbiddenException when request belongs to another customer', async () => {
+      prisma.serviceRequest.findUnique.mockResolvedValue({ ...mockAcceptedRequest, customerId: 'other-user' });
+      await expect(service.create(CUSTOMER_ID, { serviceRequestId: REQUEST_ID })).rejects.toThrow(ForbiddenException);
+    });
+
+    it('throws BadRequestException when request is not ACCEPTED', async () => {
+      prisma.serviceRequest.findUnique.mockResolvedValue({ ...mockAcceptedRequest, status: 'PENDING' });
+      await expect(service.create(CUSTOMER_ID, { serviceRequestId: REQUEST_ID })).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when a booking already exists for this request', async () => {
+      prisma.serviceRequest.findUnique.mockResolvedValue(mockAcceptedRequest);
+      repo.findByServiceRequestId.mockResolvedValue(mockBooking);
+      await expect(service.create(CUSTOMER_ID, { serviceRequestId: REQUEST_ID })).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ── close ─────────────────────────────────────────────────────────────────
+
+  describe('close', () => {
+    it('closes a COMPLETED booking and releases escrow by default', async () => {
+      repo.findById.mockResolvedValue({ ...mockBooking, status: 'COMPLETED' });
+
+      await service.close(BOOKING_ID);
+      expect(prisma.booking.updateMany).toHaveBeenCalledWith({
+        where: { id: BOOKING_ID, status: 'COMPLETED' },
+        data:  { status: 'CLOSED' },
+      });
+      expect(eventEmitter.emit).toHaveBeenCalledWith('escrow.released', expect.any(Object));
+    });
+
+    it('closes a DISPUTED booking with REFUND and does not release', async () => {
+      repo.findById.mockResolvedValue({ ...mockBooking, status: 'DISPUTED' });
+
+      await service.close(BOOKING_ID, 'REFUND');
+      expect(eventEmitter.emit).toHaveBeenCalledWith('escrow.refunded', expect.any(Object));
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith('escrow.released', expect.any(Object));
+    });
+
+    it('throws BadRequestException when booking is not COMPLETED or DISPUTED', async () => {
+      repo.findById.mockResolvedValue({ ...mockBooking, status: 'IN_PROGRESS' });
+      await expect(service.close(BOOKING_ID)).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when the booking was already closed by a racing call', async () => {
+      repo.findById.mockResolvedValue({ ...mockBooking, status: 'COMPLETED' });
+      prisma.booking.updateMany.mockResolvedValue({ count: 0 });
+      await expect(service.close(BOOKING_ID)).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws NotFoundException when booking not found', async () => {
+      repo.findById.mockResolvedValue(null);
+      await expect(service.close('bad')).rejects.toThrow(NotFoundException);
+    });
   });
 
   // ── updateStatus ──────────────────────────────────────────────────────────
@@ -224,22 +344,36 @@ describe('BookingsService', () => {
       expect(result.status).toBe(BookingStatus.IN_PROGRESS);
     });
 
-    it('provider transitions IN_PROGRESS → COMPLETED and emits escrow release', async () => {
-      repo.findById.mockResolvedValue({ ...mockBooking, status: 'IN_PROGRESS' });
+    it('does NOT release escrow directly on COMPLETED — that only happens via close()', async () => {
+      repo.findById.mockResolvedValue({ ...mockBooking, status: 'IN_PROGRESS', quotation: { conversationId: CONVO_ID } });
       const updated = { ...mockBooking, status: BookingStatus.COMPLETED };
       repo.update.mockResolvedValue(updated);
-      prisma.quotation.findUnique.mockResolvedValue({ conversationId: CONVO_ID });
       prisma.conversation.update.mockResolvedValue({});
       prisma.message.create.mockResolvedValue({ id: 'msg-1' });
 
       await service.updateStatus(BOOKING_ID, PROVIDER_ID, { status: 'COMPLETED' });
-      expect(eventEmitter.emit).toHaveBeenCalledWith('escrow.released', expect.any(Object));
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith('escrow.released', expect.any(Object));
     });
 
-    it('archives conversation on COMPLETED', async () => {
-      repo.findById.mockResolvedValue({ ...mockBooking, status: 'IN_PROGRESS' });
+    it('archives conversation on COMPLETED (quotation-origin booking)', async () => {
+      repo.findById.mockResolvedValue({ ...mockBooking, status: 'IN_PROGRESS', quotation: { conversationId: CONVO_ID } });
       repo.update.mockResolvedValue({ ...mockBooking, status: 'COMPLETED' });
-      prisma.quotation.findUnique.mockResolvedValue({ conversationId: CONVO_ID });
+      prisma.conversation.update.mockResolvedValue({});
+      prisma.message.create.mockResolvedValue({ id: 'msg-1' });
+
+      await service.updateStatus(BOOKING_ID, PROVIDER_ID, { status: 'COMPLETED' });
+      expect(prisma.conversation.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: CONVO_ID },
+        data:  expect.objectContaining({ isArchived: true, closedReason: 'COMPLETED' }),
+      }));
+    });
+
+    it('archives conversation on COMPLETED (serviceRequest-origin booking)', async () => {
+      repo.findById.mockResolvedValue({
+        ...mockBooking, status: 'IN_PROGRESS', quotationId: null, quotation: null,
+        serviceRequest: { conversationId: CONVO_ID },
+      });
+      repo.update.mockResolvedValue({ ...mockBooking, status: 'COMPLETED' });
       prisma.conversation.update.mockResolvedValue({});
       prisma.message.create.mockResolvedValue({ id: 'msg-1' });
 
@@ -251,9 +385,8 @@ describe('BookingsService', () => {
     });
 
     it('archives conversation on CANCELLED', async () => {
-      repo.findById.mockResolvedValue({ ...mockBooking, status: 'CONFIRMED' });
+      repo.findById.mockResolvedValue({ ...mockBooking, status: 'CONFIRMED', quotation: { conversationId: CONVO_ID } });
       repo.update.mockResolvedValue({ ...mockBooking, status: 'CANCELLED' });
-      prisma.quotation.findUnique.mockResolvedValue({ conversationId: CONVO_ID });
       prisma.conversation.update.mockResolvedValue({});
       prisma.message.create.mockResolvedValue({ id: 'msg-1' });
 
@@ -267,9 +400,8 @@ describe('BookingsService', () => {
     });
 
     it('emits escrow refund on CANCELLED', async () => {
-      repo.findById.mockResolvedValue({ ...mockBooking, status: 'CONFIRMED' });
+      repo.findById.mockResolvedValue({ ...mockBooking, status: 'CONFIRMED', quotation: null });
       repo.update.mockResolvedValue({ ...mockBooking, status: 'CANCELLED' });
-      prisma.quotation.findUnique.mockResolvedValue({ conversationId: null });
 
       await service.updateStatus(BOOKING_ID, CUSTOMER_ID, {
         status: 'CANCELLED', cancelReason: 'Not needed',
